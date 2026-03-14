@@ -286,7 +286,7 @@ export function Timeline() {
         }}
       >
         <div className="absolute inset-y-0 left-0 w-px bg-red-400" style={{ left: `${totalFrames > 0 ? (currentFrame / totalFrames) * 100 : 0}%` }} />
-        <div className="flex h-full w-full">
+        <div data-testid="timeline-scenes" className="flex h-full w-full">
           {ranges.map((range) => {
             const isSelected = range.index === currentSceneIndex;
             const widthPercent = totalFrames > 0 ? (range.frameLength / totalFrames) * 100 : 100;
@@ -439,6 +439,21 @@ export function Timeline() {
           >
             Remove Scene
           </button>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-gray-400">
+            BGM:
+            <input
+              type="file"
+              accept="audio/*"
+              data-testid="bgm-input"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                useSceneStore.getState().setBgmFile(file);
+              }}
+              className="text-sm text-gray-400 file:mr-2 file:rounded-md file:border-0 file:bg-gray-800 file:px-3 file:py-1 file:text-sm file:text-white file:cursor-pointer"
+            />
+          </label>
         </div>
         <div className="text-sm text-gray-400">
           {selectedScene ? `${selectedScene.name} selected` : "No scene selected"}

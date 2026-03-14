@@ -28,6 +28,7 @@ interface SceneStore {
   scenes: SceneItem[];
   currentProjectId: string | null;
   projectName: string;
+  bgmFile: File | null;
   currentSceneIndex: number;
   isPlaying: boolean;
   currentFrame: number;
@@ -47,6 +48,7 @@ interface SceneStore {
   updateSceneParam: (id: string, key: string, value: unknown) => void;
   reorderScenes: (fromIndex: number, toIndex: number) => void;
   updateSceneDuration: (id: string, duration: number) => void;
+  setBgmFile: (file: File | null) => void;
 }
 
 const TitleScene = defineScene({
@@ -303,6 +305,7 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
   scenes: initialScenes,
   currentProjectId: null,
   projectName: "",
+  bgmFile: null,
   currentSceneIndex: 0,
   isPlaying: false,
   currentFrame: 0,
@@ -505,6 +508,7 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
           state.currentSceneIndex === fromIndex ? toIndex : state.currentSceneIndex,
       };
     }),
+  setBgmFile: (file) => set(() => ({ bgmFile: file })),
   updateSceneDuration: (id, duration) =>
     set((state) => {
       const scenes = state.scenes.map((scene) =>

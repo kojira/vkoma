@@ -34,22 +34,29 @@ export function Header() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Setup audio: load BGM mp3
+    // Setup audio: use BGM file from store if available
     const audioCtx = new AudioContext();
     let audioSource: AudioBufferSourceNode | null = null;
     const audioDest = audioCtx.createMediaStreamDestination();
 
-    try {
-      const response = await fetch("/bgm.mp3");
-      const arrayBuffer = await response.arrayBuffer();
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-      audioSource = audioCtx.createBufferSource();
-      audioSource.buffer = audioBuffer;
-      audioSource.loop = true;
-      audioSource.connect(audioDest);
-      audioSource.start(0);
-    } catch (e) {
-      console.warn("Failed to load BGM, proceeding without audio:", e);
+    const bgmFile = useSceneStore.getState().bgmFile;
+    if (bgmFile) {
+      try {
+        const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as ArrayBuffer);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsArrayBuffer(bgmFile);
+        });
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        audioSource = audioCtx.createBufferSource();
+        audioSource.buffer = audioBuffer;
+        audioSource.loop = true;
+        audioSource.connect(audioDest);
+        audioSource.start(0);
+      } catch (e) {
+        console.warn("Failed to decode BGM file, proceeding without audio:", e);
+      }
     }
 
     // Combine canvas video + audio streams
