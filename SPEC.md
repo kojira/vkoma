@@ -45,7 +45,7 @@ MP4 / WebM で書き出し
 
 ### テンプレートの保存・共有
 
-- ローカルに保存（JSON形式）
+- ローカルに保存（TOML形式）
 - GitHubリポジトリとしてエクスポート → 他のユーザーが `git clone` して適用
 - 将来的にvKomaテンプレートレジストリで公開
 
@@ -72,15 +72,13 @@ const project = defineProject([
 
 ### バージョン管理
 
-```json
-// vkoma.json (package.jsonと同じ思想)
-{
-  "name": "my-video",
-  "scenes": {
-    "@kojira/scenes-basic": "^1.2.0",
-    "@kojira/scenes-particles": "^0.5.1"
-  }
-}
+```toml
+# vkoma.toml
+name = "my-video"
+
+[scenes]
+"@kojira/scenes-basic" = "^1.2.0"
+"@kojira/scenes-particles" = "^0.5.1"
 ```
 
 - `vkoma update` でライブラリを最新版に更新
@@ -105,7 +103,7 @@ vkoma publish
 │   ├── TitleScene.ts     # defineScene() で定義
 │   ├── OutroScene.ts
 │   └── index.ts
-├── package.json
+├── vkoma.toml            # パッケージメタデータ
 └── vkoma.config.ts       # プレビュー用設定
 ```
 
