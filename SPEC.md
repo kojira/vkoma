@@ -23,15 +23,91 @@ Claude Code / 開発者がシーンをTypeScriptで記述
 MP4 / WebM で書き出し
 ```
 
-### Remotionとの違い
+---
 
-| | Remotion | vKoma |
-|---|---|---|
-| シーン記述 | React JSX | TypeScript（React JSX） |
-| タイムラインGUI | なし | あり |
-| パラメータ調整 | コード編集 | GUIで微調整 |
-| レンダリング | Node.js + Chromium | ブラウザ + Rust (WASM) |
-| 出力 | MP4 / GIF | MP4 / WebM |
+## テンプレートプロジェクト
+
+プロジェクト一式をテンプレートとして保存・適用できる。
+
+```
+テンプレート一覧から選択
+    ↓
+プロジェクト名・基本パラメータを入力
+    ↓
+テンプレートが展開されて即編集開始
+```
+
+### テンプレートの内容
+
+- シーン構成（どのシーンが何秒の順番で並ぶか）
+- 各シーンのデフォルトパラメータ（フォント、色、エフェクト等）
+- アセット（BGM、ロゴ画像等のプレースホルダー）
+
+### テンプレートの保存・共有
+
+- ローカルに保存（JSON形式）
+- GitHubリポジトリとしてエクスポート → 他のユーザーが `git clone` して適用
+- 将来的にvKomaテンプレートレジストリで公開
+
+---
+
+## パーツライブラリ（シーンパッケージ）
+
+作成したシーンをパッケージとして管理し、複数プロジェクトで再利用できる。  
+**npmパッケージと同じモデル** — ライブラリ側を修正すれば、それを使う全プロジェクトに反映される。
+
+### 使い方
+
+```typescript
+// パッケージをインストール（ローカル or レジストリから）
+// vkoma add @kojira/scenes-basic
+
+import { TitleScene, OutroScene } from '@kojira/scenes-basic'
+
+const project = defineProject([
+  TitleScene.with({ text: 'Hello World', effect: 'bounce' }),
+  OutroScene.with({ duration: 60 }),
+])
+```
+
+### バージョン管理
+
+```json
+// vkoma.json (package.jsonと同じ思想)
+{
+  "name": "my-video",
+  "scenes": {
+    "@kojira/scenes-basic": "^1.2.0",
+    "@kojira/scenes-particles": "^0.5.1"
+  }
+}
+```
+
+- `vkoma update` でライブラリを最新版に更新
+- バージョンを固定して再現性を担保することも可能
+- 不具合修正をライブラリ側でリリース → `vkoma update` 一発で全プロジェクトに反映
+
+### パッケージの公開
+
+```bash
+# ローカルライブラリとして登録
+vkoma publish --local ./my-scenes
+
+# vKoma レジストリ（将来）or npm に公開
+vkoma publish
+```
+
+### ライブラリ構造
+
+```
+@kojira/scenes-basic/
+├── src/
+│   ├── TitleScene.ts     # defineScene() で定義
+│   ├── OutroScene.ts
+│   └── index.ts
+├── package.json
+└── vkoma.config.ts       # プレビュー用設定
+```
 
 ---
 
@@ -248,8 +324,9 @@ Uint8Array → ブラウザでダウンロード
 |---|---|---|
 | **Phase 1: MVP** | シーン定義API + タイムライン + WebM書き出し | 動くものを作る |
 | **Phase 2: 品質** | Rustエンコーダ + MP4対応 + キーフレームGUI | 実用レベル |
-| **Phase 3: 拡張** | Monaco Editor + アセット管理 + プロジェクト保存 | 本格ツール |
-| **Phase 4: AI統合** | Claude Codeでシーン自動生成 + パラメータ提案 | AI-native制作 |
+| **Phase 3: ライブラリ** | パーツライブラリ + テンプレート + プロジェクト保存 | 再利用可能な資産を積む |
+| **Phase 4: 拡張** | Monaco Editor + アセット管理 + レジストリ公開 | 本格ツール |
+| **Phase 5: AI統合** | Claude Codeでシーン自動生成 + パラメータ提案 | AI-native制作 |
 
 ---
 
@@ -261,9 +338,16 @@ vkoma/
 │   ├── core/          # defineScene API, パラメータスキーマ
 │   ├── renderer/      # Canvas/WebGL レンダリング
 │   ├── encoder/       # Rust WASM エンコーダ
-│   └── ui/            # React タイムラインGUI
+│   ├── ui/            # React タイムラインGUI
+│   └── cli/           # vkoma add / update / publish コマンド
 ├── apps/
 │   └── studio/        # メインWebアプリ (Vite + React)
+├── scenes/            # 公式シーンパッケージ
+│   ├── scenes-basic/  # 基本シーン集（タイトル、アウトロ等）
+│   └── scenes-fx/     # エフェクト集（パーティクル、グリッチ等）
+├── templates/         # プロジェクトテンプレート
+│   ├── intro-video/
+│   └── study-session/
 ├── examples/
 │   └── title-scene/   # サンプルシーン
 └── SPEC.md
