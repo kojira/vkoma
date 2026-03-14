@@ -16,13 +16,28 @@ export interface SceneItem {
   params: Record<string, unknown>;
 }
 
+interface SavedSceneItem {
+  id: string;
+  name: string;
+  duration: number;
+  params: Record<string, unknown>;
+  sceneConfigId: string;
+}
+
 interface SceneStore {
   scenes: SceneItem[];
+  currentProjectId: string | null;
+  projectName: string;
   currentSceneIndex: number;
   isPlaying: boolean;
   currentFrame: number;
   fps: number;
   totalFrames: () => number;
+  loadProject: (id: string) => Promise<void>;
+  saveProject: () => Promise<void>;
+  createProject: (name: string) => Promise<void>;
+  clearProject: () => void;
+  setProjectName: (name: string) => void;
   addScene: (scene?: Partial<SceneItem>) => void;
   removeScene: (id: string) => void;
   updateScene: (id: string, updates: Partial<SceneItem>) => void;
@@ -213,18 +228,81 @@ export function getSceneAtFrame(
   );
 }
 
-const initialScenes: SceneItem[] = allScenePresets.map((preset, index) => ({
-  id: `scene-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
-  name: preset.name,
-  duration: preset.duration,
-  sceneConfig: preset,
-  params: Object.fromEntries(
-    Object.entries(preset.defaultParams).map(([key, param]) => [key, param.default]),
-  ),
-}));
+function createSceneFromPreset(preset: SceneConfig, index: number): SceneItem {
+  return {
+    id: `scene-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+    name: preset.name,
+    duration: preset.duration,
+    sceneConfig: preset,
+    params: Object.fromEntries(
+      Object.entries(preset.defaultParams).map(([key, param]) => [key, param.default]),
+    ),
+  };
+}
+
+function createInitialScenes(): SceneItem[] {
+  return allScenePresets.map((preset, index) => createSceneFromPreset(preset, index));
+}
+
+function serializeScenes(scenes: SceneItem[]): SavedSceneItem[] {
+  return scenes.map((scene) => ({
+    id: scene.id,
+    name: scene.name,
+    duration: scene.duration,
+    params: scene.params,
+    sceneConfigId: scene.sceneConfig.id,
+  }));
+}
+
+function deserializeScenes(rawScenes: unknown): SceneItem[] {
+  if (!Array.isArray(rawScenes)) {
+    return createInitialScenes();
+  }
+
+  const scenes = rawScenes
+    .map<SceneItem | null>((scene, index) => {
+      if (!scene || typeof scene !== "object") {
+        return null;
+      }
+
+      const savedScene = scene as Partial<SavedSceneItem> & {
+        sceneConfig?: { id?: string };
+      };
+      const sceneConfigId = savedScene.sceneConfigId ?? savedScene.sceneConfig?.id;
+      const preset = allScenePresets.find((entry) => entry.id === sceneConfigId);
+      if (!preset) {
+        return null;
+      }
+
+      return {
+        id:
+          typeof savedScene.id === "string" && savedScene.id.length > 0
+            ? savedScene.id
+            : `scene-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+        name: typeof savedScene.name === "string" ? savedScene.name : preset.name,
+        duration: clampDuration(
+          typeof savedScene.duration === "number" ? savedScene.duration : preset.duration,
+        ),
+        sceneConfig: preset,
+        params: {
+          ...Object.fromEntries(
+            Object.entries(preset.defaultParams).map(([key, param]) => [key, param.default]),
+          ),
+          ...(savedScene.params && typeof savedScene.params === "object" ? savedScene.params : {}),
+        },
+      };
+    })
+    .filter((scene): scene is SceneItem => scene !== null);
+
+  return scenes.length > 0 ? scenes : createInitialScenes();
+}
+
+const initialScenes: SceneItem[] = createInitialScenes();
 
 export const useSceneStore = create<SceneStore>((set, get) => ({
   scenes: initialScenes,
+  currentProjectId: null,
+  projectName: "",
   currentSceneIndex: 0,
   isPlaying: false,
   currentFrame: 0,
@@ -233,18 +311,101 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
     const { scenes, fps } = get();
     return scenes.reduce((sum, scene) => sum + Math.max(1, Math.round(scene.duration * fps)), 0);
   },
+  loadProject: async (id) => {
+    const response = await fetch(`/api/projects/${id}`);
+    if (!response.ok) {
+      throw new Error("Failed to load project");
+    }
+
+    const data = (await response.json()) as {
+      project?: { id?: string; name?: string; scenes?: unknown };
+    };
+    const project = data.project;
+    if (!project?.id) {
+      throw new Error("Invalid project response");
+    }
+
+    const scenes = deserializeScenes(project.scenes);
+    set(() => ({
+      currentProjectId: project.id ?? null,
+      projectName: typeof project.name === "string" ? project.name : "",
+      scenes,
+      currentSceneIndex: 0,
+      currentFrame: 0,
+      isPlaying: false,
+    }));
+  },
+  saveProject: async () => {
+    const { currentProjectId, projectName, scenes } = get();
+    if (!currentProjectId) {
+      return;
+    }
+
+    const response = await fetch(`/api/projects/${currentProjectId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: projectName || "Untitled Project",
+        scenes: serializeScenes(scenes),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to save project");
+    }
+  },
+  createProject: async (name) => {
+    const projectScenes = createInitialScenes();
+    const response = await fetch("/api/projects", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name,
+        scenes: serializeScenes(projectScenes),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to create project");
+    }
+
+    const data = (await response.json()) as {
+      project?: { id?: string; name?: string; scenes?: unknown };
+    };
+    const project = data.project;
+    if (!project?.id) {
+      throw new Error("Invalid project response");
+    }
+
+    set(() => ({
+      currentProjectId: project.id,
+      projectName: typeof project.name === "string" ? project.name : name,
+      scenes: deserializeScenes(project.scenes),
+      currentSceneIndex: 0,
+      currentFrame: 0,
+      isPlaying: false,
+    }));
+  },
+  clearProject: () =>
+    set(() => ({
+      currentProjectId: null,
+      projectName: "",
+      scenes: createInitialScenes(),
+      currentSceneIndex: 0,
+      currentFrame: 0,
+      isPlaying: false,
+    })),
+  setProjectName: (name) => set(() => ({ projectName: name })),
   addScene: (scene) =>
     set((state) => {
       const nextIndex = state.scenes.length;
       const preset = allScenePresets[nextIndex % allScenePresets.length] ?? TitleScene;
       const fallback: SceneItem = {
-        id: `scene-${Date.now()}-${nextIndex}-${Math.random().toString(36).slice(2, 8)}`,
-        name: preset.name,
-        duration: preset.duration,
-        sceneConfig: preset,
-        params: Object.fromEntries(
-          Object.entries(preset.defaultParams).map(([key, param]) => [key, param.default]),
-        ),
+        ...createSceneFromPreset(preset, nextIndex),
       };
       const nextScene: SceneItem = {
         ...fallback,

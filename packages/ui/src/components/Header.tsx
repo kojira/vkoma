@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { renderScene } from '@vkoma/core';
-import { getSceneAtFrame, useSceneStore } from '../stores/sceneStore';
+import { useState } from "react";
+import { renderScene } from "@vkoma/core";
+import { getSceneAtFrame, useSceneStore } from "../stores/sceneStore";
 
 const EXPORT_WIDTH = 1920;
 const EXPORT_HEIGHT = 1080;
@@ -13,10 +13,14 @@ function wait(ms: number) {
 
 export function Header() {
   const [exportProgress, setExportProgress] = useState<number | null>(null);
+  const clearProject = useSceneStore((state) => state.clearProject);
+  const projectName = useSceneStore((state) => state.projectName);
+  const saveProject = useSceneStore((state) => state.saveProject);
+  const setProjectName = useSceneStore((state) => state.setProjectName);
 
   const exportVideo = async () => {
-    if (typeof MediaRecorder === 'undefined') {
-      window.alert('MediaRecorder is not supported in this browser.');
+    if (typeof MediaRecorder === "undefined") {
+      window.alert("MediaRecorder is not supported in this browser.");
       return;
     }
 
@@ -36,7 +40,7 @@ export function Header() {
     const audioDest = audioCtx.createMediaStreamDestination();
 
     try {
-      const response = await fetch('/bgm.mp3');
+      const response = await fetch("/bgm.mp3");
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
       audioSource = audioCtx.createBufferSource();
@@ -45,7 +49,7 @@ export function Header() {
       audioSource.connect(audioDest);
       audioSource.start(0);
     } catch (e) {
-      console.warn('Failed to load BGM, proceeding without audio:', e);
+      console.warn("Failed to load BGM, proceeding without audio:", e);
     }
 
     // Combine canvas video + audio streams
@@ -55,11 +59,11 @@ export function Header() {
       ...audioDest.stream.getAudioTracks(),
     ]);
 
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-      ? 'video/webm;codecs=vp9,opus'
-      : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-        ? 'video/webm;codecs=vp8,opus'
-        : 'video/webm';
+    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+      ? "video/webm;codecs=vp9,opus"
+      : MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
+        ? "video/webm;codecs=vp8,opus"
+        : "video/webm";
     const recorder = new MediaRecorder(combinedStream, { mimeType });
     const chunks: Blob[] = [];
 
@@ -105,18 +109,52 @@ export function Header() {
     }
   };
 
+  const handleRenameProject = () => {
+    const nextName = window.prompt("プロジェクト名を入力してください", projectName || "Untitled Project");
+    if (!nextName?.trim()) {
+      return;
+    }
+
+    setProjectName(nextName.trim());
+  };
+
   return (
-    <header className='flex items-center justify-between border-b border-gray-800 bg-gray-950 px-6 py-4'>
-      <h1 className='text-xl font-semibold tracking-wide text-white'>vKoma</h1>
-      <button
-        type='button'
-        data-testid='export-button'
-        onClick={() => void exportVideo()}
-        disabled={exportProgress !== null}
-        className='rounded-md bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:bg-blue-500/60'
-      >
-        {exportProgress === null ? 'Export' : `Exporting ${exportProgress}%`}
-      </button>
+    <header className="flex items-center justify-between border-b border-gray-800 bg-gray-950 px-6 py-4">
+      <div className="flex items-center gap-4">
+        <button
+          type="button"
+          onClick={() => clearProject()}
+          className="rounded-md border border-gray-700 px-3 py-2 text-sm font-medium text-gray-300 transition hover:border-gray-500 hover:text-white"
+        >
+          ← プロジェクト一覧
+        </button>
+        <button
+          type="button"
+          onClick={handleRenameProject}
+          className="text-xl font-semibold tracking-wide text-white"
+        >
+          {`vKoma - ${projectName || "Untitled Project"}`}
+        </button>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => void saveProject()}
+          disabled={exportProgress !== null}
+          className="rounded-md border border-gray-700 px-4 py-2 text-sm font-medium text-gray-200 transition hover:border-gray-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          💾 保存
+        </button>
+        <button
+          type="button"
+          data-testid="export-button"
+          onClick={() => void exportVideo()}
+          disabled={exportProgress !== null}
+          className="rounded-md bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:bg-blue-500/60"
+        >
+          {exportProgress === null ? "Export" : `Exporting ${exportProgress}%`}
+        </button>
+      </div>
     </header>
   );
 }

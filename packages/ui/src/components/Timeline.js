@@ -169,7 +169,14 @@ export function Timeline() {
                                     setPlaying(false);
                                     setCurrentFrame(0);
                                     setCurrentScene(0);
-                                }, className: "rounded-md bg-gray-800 px-3 py-2 text-sm font-medium text-white transition hover:bg-gray-700", children: "Reset" })] }), _jsxs("div", { className: "flex items-center gap-4 text-sm text-gray-300", children: [_jsxs("span", { children: [formatTime(currentFrame, fps), " / ", formatTime(totalFrames, fps)] }), _jsxs("span", { children: ["Frame ", currentFrame + 1] })] })] }), _jsxs("div", { ref: timelineRef, className: "relative mt-4 h-24 overflow-hidden rounded-lg border border-gray-800 bg-gray-900", onMouseDown: (event) => {
+                                }, className: "rounded-md bg-gray-800 px-3 py-2 text-sm font-medium text-white transition hover:bg-gray-700", children: "Reset" })] }), _jsxs("div", { className: "flex items-center gap-4 text-sm text-gray-300", children: [_jsxs("span", { children: [formatTime(currentFrame, fps), " / ", formatTime(totalFrames, fps)] }), _jsxs("span", { children: ["Frame ", currentFrame + 1] })] })] }), _jsx("div", { className: "mt-3", children: _jsx("input", { type: "range", min: 0, max: totalFrames - 1, value: currentFrame, onChange: (event) => {
+                        const nextFrame = Number.parseInt(event.target.value, 10);
+                        setCurrentFrame(nextFrame);
+                        const activeRange = ranges.find((range) => nextFrame >= range.startFrame && nextFrame < range.endFrame);
+                        if (activeRange) {
+                            setCurrentScene(activeRange.index);
+                        }
+                    }, className: "w-full h-4 cursor-pointer accent-blue-500", style: { minHeight: "44px" } }) }), _jsxs("div", { ref: timelineRef, className: "relative mt-4 h-24 overflow-hidden rounded-lg border border-gray-800 bg-gray-900", onMouseDown: (event) => {
                     if (event.target !== event.currentTarget) {
                         return;
                     }
