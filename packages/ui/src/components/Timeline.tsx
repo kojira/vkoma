@@ -253,6 +253,28 @@ export function Timeline() {
         </div>
       </div>
 
+      <div className="mt-3">
+        <input
+          type="range"
+          min={0}
+          max={totalFrames - 1}
+          value={currentFrame}
+          onChange={(event) => {
+            const nextFrame = Number.parseInt(event.target.value, 10);
+            setCurrentFrame(nextFrame);
+
+            const activeRange = ranges.find(
+              (range) => nextFrame >= range.startFrame && nextFrame < range.endFrame,
+            );
+            if (activeRange) {
+              setCurrentScene(activeRange.index);
+            }
+          }}
+          className="w-full h-4 cursor-pointer accent-blue-500"
+          style={{ minHeight: "44px" }}
+        />
+      </div>
+
       <div
         ref={timelineRef}
         className="relative mt-4 h-24 overflow-hidden rounded-lg border border-gray-800 bg-gray-900"
