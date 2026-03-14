@@ -357,6 +357,67 @@ SE・複数トラックは Phase 2 以降。
 
 ---
 
+## AIバックエンド（プラガブル設計）
+
+### 設計思想
+
+- vKomaのAIコーディング機能は特定のAIツールに依存しない
+- プラグイン/アダプター設計で、共通インターフェースを通じて各AIバックエンドを呼び出す
+- 将来のAIツール追加も容易
+
+### 対応AIバックエンド一覧
+
+| バックエンド | コマンド | 特徴 | 向いている用途 |
+|---|---|---|---|
+| Claude Code | `claude` | 高精度なコード生成、長文コンテキスト理解 | 複雑なシーンロジック、リファクタリング |
+| Codex CLI | `codex` | OpenAI製、高速レスポンス | シンプルなシーン生成、素早い修正 |
+| Cursor CLI | `cursor` | エディタ統合、差分ベース編集 | 既存シーンの部分修正 |
+| Gemini CLI | `gemini` | Google製、マルチモーダル対応 | 画像参照からのシーン生成 |
+
+### アダプター設計
+
+共通インターフェース `AIBackendAdapter` を定義:
+
+```typescript
+interface AIBackendAdapter {
+  name: string
+  command: string
+  generateScene(prompt: string, context: SceneContext): Promise<GeneratedCode>
+  modifyScene(prompt: string, existingCode: string): Promise<GeneratedCode>
+  isAvailable(): Promise<boolean>
+}
+```
+
+各バックエンドのアダプター実装クラス:
+
+- `ClaudeCodeAdapter`
+- `CodexAdapter`
+- `CursorAdapter`
+- `GeminiAdapter`
+
+### バックエンド選択UI
+
+- 設定画面でドロップダウンから選択
+- AIチャット画面のヘッダーに現在のバックエンド表示
+- チャット中に `/backend claude` のようなコマンドで切り替え可能
+
+### 設定例
+
+```toml
+# vkoma.toml
+[ai]
+backend = "claude-code"    # claude-code | codex | cursor | gemini
+auto_detect = true         # インストール済みのCLIを自動検出
+fallback = "codex"         # メインが利用不可の場合のフォールバック
+```
+
+### フォールバック戦略
+
+- 選択されたバックエンドが利用不可の場合、fallbackに自動切り替え
+- 全バックエンドが利用不可の場合はエラーメッセージを表示
+
+---
+
 ## 技術スタック
 
 | レイヤー | 技術 |
@@ -367,6 +428,7 @@ SE・複数トラックは Phase 2 以降。
 | 状態管理 | Zustand |
 | ビルドツール | Vite |
 | エンコーダ | Rust (WASM) — mp4rs / webm-rs |
+| AIバックエンド連携 | CLIアダプター（Claude Code / Codex / Cursor / Gemini） |
 | テスト | Vitest + Playwright |
 
 ---
