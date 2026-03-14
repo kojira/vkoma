@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { defineScene, fade, params as sceneParams, } from "../../../../packages/core/src/index";
+import { defineScene, fade, bounce, slide, params as sceneParams, } from "../../../../packages/core/src/index";
 const TitleScene = defineScene({
     id: "title-scene",
     name: "Title Scene",
@@ -28,15 +28,96 @@ const TitleScene = defineScene({
         ctx.restore();
     },
 });
-function createDefaultScene(index = 0) {
-    return {
-        id: `scene-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
-        name: index === 0 ? "Intro" : `Scene ${index + 1}`,
-        duration: TitleScene.duration,
-        sceneConfig: TitleScene,
-        params: Object.fromEntries(Object.entries(TitleScene.defaultParams).map(([key, param]) => [key, param.default])),
-    };
-}
+const SubtitleScene = defineScene({
+    id: "subtitle-scene",
+    name: "Subtitle Scene",
+    duration: 3,
+    defaultParams: {
+        text: sceneParams.string("Subtitle", "AI-powered video creator"),
+        fontSize: sceneParams.number("Font Size", 48, { min: 16, max: 96, step: 1 }),
+        color: sceneParams.color("Text Color", "#60a5fa"),
+        bgColor: sceneParams.color("Background", "#111827"),
+    },
+    draw: (ctx, rawParams, time) => {
+        const p = rawParams;
+        ctx.fillStyle = p.bgColor;
+        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        const x = slide(time, 1.5, -ctx.canvas.width, ctx.canvas.width / 2);
+        ctx.fillStyle = p.color;
+        ctx.font = `600 ${p.fontSize}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(p.text, x, ctx.canvas.height / 2);
+    },
+});
+const ColorScene = defineScene({
+    id: "color-scene",
+    name: "Color Scene",
+    duration: 3,
+    defaultParams: {
+        speed: sceneParams.number("Speed", 1, { min: 0.1, max: 5, step: 0.1 }),
+    },
+    draw: (ctx, rawParams, time) => {
+        const p = rawParams;
+        const hue = (time * p.speed * 120) % 360;
+        ctx.fillStyle = `hsl(${hue}, 70%, 50%)`;
+        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "700 64px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.globalAlpha = 0.8;
+        ctx.fillText("🎨 Colors!", ctx.canvas.width / 2, ctx.canvas.height / 2);
+        ctx.globalAlpha = 1;
+    },
+});
+const BouncingTextScene = defineScene({
+    id: "bouncing-text-scene",
+    name: "Bouncing Text",
+    duration: 4,
+    defaultParams: {
+        text: sceneParams.string("Text", "Create Amazing Videos"),
+        fontSize: sceneParams.number("Font Size", 56, { min: 20, max: 100, step: 1 }),
+        color: sceneParams.color("Text Color", "#fbbf24"),
+        bgColor: sceneParams.color("Background", "#1e1b4b"),
+    },
+    draw: (ctx, rawParams, time) => {
+        const p = rawParams;
+        ctx.fillStyle = p.bgColor;
+        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        const b = bounce(time, 2);
+        const y = ctx.canvas.height - b * (ctx.canvas.height / 2);
+        ctx.fillStyle = p.color;
+        ctx.font = `700 ${p.fontSize}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(p.text, ctx.canvas.width / 2, y);
+    },
+});
+const OutroScene = defineScene({
+    id: "outro-scene",
+    name: "Outro Scene",
+    duration: 3,
+    defaultParams: {
+        text: sceneParams.string("Text", "Thank you"),
+        fontSize: sceneParams.number("Font Size", 72, { min: 24, max: 120, step: 1 }),
+        color: sceneParams.color("Text Color", "#ffffff"),
+        bgColor: sceneParams.color("Background", "#111827"),
+    },
+    draw: (ctx, rawParams, time) => {
+        const p = rawParams;
+        ctx.fillStyle = p.bgColor;
+        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        ctx.globalAlpha = Math.max(0, 1 - fade(time, 3));
+        ctx.fillStyle = p.color;
+        ctx.font = `700 ${p.fontSize}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(p.text, ctx.canvas.width / 2, ctx.canvas.height / 2);
+        ctx.globalAlpha = 1;
+    },
+});
+const allScenePresets = [TitleScene, SubtitleScene, ColorScene, BouncingTextScene, OutroScene];
 function clampDuration(duration) {
     return Math.max(0.5, Number.isFinite(duration) ? duration : 0.5);
 }
@@ -70,7 +151,13 @@ export function getSceneAtFrame(scenes, fps, frame) {
     return (ranges.find((range) => clampedFrame >= range.startFrame && clampedFrame < range.endFrame) ??
         ranges[ranges.length - 1]);
 }
-const initialScenes = [createDefaultScene(0)];
+const initialScenes = allScenePresets.map((preset, index) => ({
+    id: `scene-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+    name: preset.name,
+    duration: preset.duration,
+    sceneConfig: preset,
+    params: Object.fromEntries(Object.entries(preset.defaultParams).map(([key, param]) => [key, param.default])),
+}));
 export const useSceneStore = create((set, get) => ({
     scenes: initialScenes,
     currentSceneIndex: 0,
@@ -83,7 +170,14 @@ export const useSceneStore = create((set, get) => ({
     },
     addScene: (scene) => set((state) => {
         const nextIndex = state.scenes.length;
-        const fallback = createDefaultScene(nextIndex);
+        const preset = allScenePresets[nextIndex % allScenePresets.length] ?? TitleScene;
+        const fallback = {
+            id: `scene-${Date.now()}-${nextIndex}-${Math.random().toString(36).slice(2, 8)}`,
+            name: preset.name,
+            duration: preset.duration,
+            sceneConfig: preset,
+            params: Object.fromEntries(Object.entries(preset.defaultParams).map(([key, param]) => [key, param.default])),
+        };
         const nextScene = {
             ...fallback,
             ...scene,
