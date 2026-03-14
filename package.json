@@ -1,0 +1,7 @@
+{
+  "name": "vkoma",
+  "private": true,
+  "scripts": {
+    "dev": "echo run packages individually"
+  }
+}
