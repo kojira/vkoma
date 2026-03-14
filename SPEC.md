@@ -113,6 +113,28 @@ vkoma publish
 
 ## アーキテクチャ概要
 
+### 全体アーキテクチャ
+
+```
+┌─────────────────────────────────────────────────────┐
+│              クライアント（ブラウザ）                   │
+│  ┌─────────┐ ┌──────────┐ ┌────────────────────┐   │
+│  │ AIチャット│ │タイムライン│ │ プレビュープレーヤー │   │
+│  └────┬─────┘ └────┬─────┘ └────────┬───────────┘   │
+└───────┼────────────┼────────────────┼───────────────┘
+        │            │                │
+        ▼ HTTP/WS    ▼ HTTP           ▼ WS
+┌─────────────────────────────────────────────────────┐
+│         ローカルバックエンドサーバー（Node.js）         │
+│  ┌──────────┐ ┌──────────────┐ ┌────────────────┐  │
+│  │AI CLI連携 │ │プロジェクト管理│ │WebSocket Server│  │
+│  │(Adapter)  │ │(ローカルFS)   │ │(リアルタイム同期)│  │
+│  └──────────┘ └──────────────┘ └────────────────┘  │
+└─────────────────────────────────────────────────────┘
+```
+
+### ブラウザ内コンポーネント
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │                    vKoma (ブラウザ)                   │
@@ -159,6 +181,90 @@ vkoma publish
 - 開発時: Vite dev server がシーンファイルを監視、変更時に即座にプレビュー反映
 - ライブラリ: `node_modules` から通常の ESM import で読み込み
 - 書き出し時: 全シーンを静的にバンドルして Web Worker 内で実行
+
+---
+
+## ローカルバックエンドサーバー
+
+vKomaはローカルバックエンドサーバー（Node.js）を介して動作する。ブラウザ（PC/スマホ）はHTTP/WebSocketでバックエンドに接続する。
+
+### 役割
+
+- AI CLI呼び出し（Claude Code / Codex / Cursor / Gemini CLI をサブプロセスとして実行）
+- プロジェクトファイル管理（ローカルファイルシステム上の読み書き）
+- シーンコードのバンドル・配信（Vite をプログラマティックに起動）
+- WebSocketによるリアルタイム同期（プレビュー更新・AI生成結果の配信）
+
+### 技術
+
+- Node.js + Hono（APIサーバー）
+- WebSocket（リアルタイム通信）
+- Vite（シーンコードのバンドル・HMR）
+
+### 起動方法
+
+```bash
+vkoma serve                    # デフォルト: http://localhost:3000
+vkoma serve --port 8080        # ポート指定
+```
+
+起動時にローカルIPアドレスとQRコードを表示。同一WiFi内のスマホから http://192.168.x.x:3000 でアクセス可能。
+
+### アーキテクチャ
+
+```
+スマホ・PC（ブラウザ）
+    ↓ HTTP/WebSocket
+ローカルバックエンドサーバー（Node.js）
+    ├── AI CLI呼び出し（Claude Code / Codex / Cursor / Gemini）
+    ├── プロジェクトファイル管理（ローカルFS: ~/vkoma-projects/）
+    ├── シーンコードのバンドル・実行
+    └── WebSocket: プレビュー同期・AI生成結果のリアルタイム配信
+```
+
+### APIエンドポイント例
+
+| メソッド | パス | 説明 |
+|---|---|---|
+| GET | /api/projects | プロジェクト一覧 |
+| POST | /api/projects | 新規プロジェクト作成 |
+| GET | /api/projects/:id/scenes | シーン一覧取得 |
+| PUT | /api/projects/:id/scenes/:name | シーン更新 |
+| POST | /api/ai/chat | AIチャットメッセージ送信 |
+| WS | /ws | リアルタイム同期 |
+
+---
+
+## プロジェクト保存
+
+### 保存先
+
+プロジェクトはローカルファイルシステムに保存する。IndexedDBやFile System Access APIは使用しない。
+
+保存先: ~/vkoma-projects/<project-name>/
+
+### ディレクトリ構成
+
+```
+~/vkoma-projects/my-video/
+├── vkoma.toml          # プロジェクト設定
+├── scenes/
+│   ├── TitleScene.ts   # AIが生成したシーンコード
+│   ├── BodyScene.ts
+│   └── OutroScene.ts
+├── assets/
+│   ├── bgm.mp3
+│   └── logo.png
+└── dist/               # ビルド成果物（.gitignore対象）
+    └── output.webm
+```
+
+### 特徴
+
+- git管理可能な構造（.gitignore で dist/ を除外）
+- vkoma.toml にプロジェクト設定・シーン構成・依存パッケージを記述
+- scenes/ ディレクトリにAIが生成したTypeScriptファイルを格納
+- assets/ ディレクトリに画像・音声ファイルを格納
 
 ---
 
@@ -427,6 +533,8 @@ fallback = "codex"         # メインが利用不可の場合のフォールバ
 | プレビュー描画 | Canvas 2D / WebGL (Three.js or raw) |
 | 状態管理 | Zustand |
 | ビルドツール | Vite |
+| バックエンドサーバー | Node.js + Hono |
+| リアルタイム通信 | WebSocket |
 | エンコーダ | Rust (WASM) — mp4rs / webm-rs |
 | AIバックエンド連携 | CLIアダプター（Claude Code / Codex / Cursor / Gemini） |
 | テスト | Vitest + Playwright |
@@ -444,7 +552,7 @@ fallback = "codex"         # メインが利用不可の場合のフォールバ
 - [ ] パラメータパネル（スライダー・テキスト・セレクト）
 - [ ] WebM書き出し（WebCodecs API使用、Rustなし）
 - [ ] 基本エフェクト: `bounce`, `slide`, `zoom`, `fade`
-- [ ] プロジェクト保存/読み込み（JSON形式）
+- [ ] プロジェクト保存/読み込み（ローカルFS、vkoma.toml + scenes/）
 - [ ] BGMトラック1本（Web Audio API）
 
 ### 含まない機能（フェーズ2以降）
@@ -473,6 +581,7 @@ vkoma/
 │   ├── core/          # defineScene API, パラメータスキーマ
 │   ├── renderer/      # Canvas/WebGL レンダリング
 │   ├── encoder/       # Rust WASM エンコーダ
+│   ├── server/        # ローカルバックエンドサーバー（Hono + WebSocket）
 │   ├── ui/            # React タイムラインGUI
 │   └── cli/           # vkoma add / update / publish コマンド
 ├── apps/
