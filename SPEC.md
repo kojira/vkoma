@@ -146,6 +146,18 @@ vkoma publish
 └─────────────────────────────────────────────────────┘
 ```
 
+### シーンコードの実行モデル
+
+シーンの TypeScript コードは Vite の HMR（Hot Module Replacement）で動的に読み込まれる。
+
+```
+ファイル保存 → Vite HMR → シーン再登録 → プレビュー自動更新
+```
+
+- 開発時: Vite dev server がシーンファイルを監視、変更時に即座にプレビュー反映
+- ライブラリ: `node_modules` から通常の ESM import で読み込み
+- 書き出し時: 全シーンを静的にバンドルして Web Worker 内で実行
+
 ---
 
 ## シーン定義 API
@@ -165,19 +177,23 @@ const TitleScene = defineScene({
     y:         params.number(540, { min: 0, max: 1080 }),
     color:     params.color('#ffffff'),
     effect:    params.select('bounce', ['bounce', 'slide', 'zoom', 'fade']),
-    duration:  params.frames(90),   // フレーム数
+    duration:  params.duration(3, "s"),   // 秒指定（フレーム指定も可）
   },
 
   // レンダリング関数
-  render: ({ frame, duration, params, ctx }) => {
+  render: ({ frame, duration, params, draw }) => {
     const progress = frame / duration  // 0.0 → 1.0
 
     // エフェクト別アニメーション
     const y = applyEffect(params.effect, params.y, progress)
 
-    ctx.font = `${params.fontSize}px ${params.font}`
-    ctx.fillStyle = params.color
-    ctx.fillText(params.text, params.x, y)
+    draw.text(params.text, {
+      x: params.x,
+      y,
+      font: params.font,
+      fontSize: params.fontSize,
+      color: params.color,
+    })
   },
 })
 ```
@@ -190,11 +206,31 @@ const TitleScene = defineScene({
 | 数値 | `params.number(default, {min, max, step})` | スライダー |
 | 色 | `params.color(default)` | カラーピッカー |
 | 選択肢 | `params.select(default, options[])` | ドロップダウン |
-| フレーム数 | `params.frames(default)` | タイムラインバー長さ |
+| 時間 | `params.duration(default, unit?)` | 数値入力（秒/フレーム切替） |
 | 座標 | `params.position(x, y)` | 画面上でドラッグ |
 | 真偽値 | `params.boolean(default)` | トグルスイッチ |
 | 画像 | `params.image()` | ファイル選択 |
 | 動画 | `params.video()` | ファイル選択 |
+
+### ライフサイクルフック
+
+```typescript
+const scene = defineScene({
+  params: { ... },
+
+  // 初期化（アセット読み込み等）
+  setup: async ({ params, assets }) => {
+    const img = await assets.load("logo.png")
+    return { img }  // render に渡される
+  },
+
+  // 毎フレーム描画
+  render: ({ frame, duration, params, draw, state }) => { ... },
+
+  // クリーンアップ
+  cleanup: ({ state }) => { ... },
+})
+```
 
 ---
 
@@ -234,12 +270,15 @@ const TitleScene = defineScene({
 - **シーン右クリック**: 複製 / 削除 / キーフレーム追加
 - **キーフレーム (◆)**: 特定フレームでパラメータ値を固定、間は自動補間
 - **スケール変更**: タイムライン横のズームイン/アウト
+- **Undo / Redo**: `Cmd+Z` / `Cmd+Shift+Z`（全操作が対象）
+- **レイヤー**: 同一時間帯に複数シーンを重ねて配置可能。上のレイヤーが前面に描画
+- **スナップ**: シーンバーをドラッグ時、他のシーンの開始/終了フレームに自動スナップ
 
 ### キーフレームアニメーション
 
 ```typescript
-// コードでキーフレームを定義することも可能
-const scene = TitleScene.withKeyframes({
+// .with() でパラメータ指定とキーフレーム指定を統合
+const scene = TitleScene.with({
   fontSize: [
     { frame: 0,  value: 0   },
     { frame: 30, value: 64  },  // 0→64 にイージング
@@ -282,6 +321,40 @@ Uint8Array → ブラウザでダウンロード
 
 ---
 
+## オーディオ
+
+### オーディオトラック
+
+タイムライン上にオーディオトラックを配置できる。
+
+```typescript
+import { defineScene, params, audio } from "vkoma"
+
+const project = defineProject({
+  scenes: [...],
+  audio: [
+    audio.bgm("./assets/bgm.mp3", { volume: 0.8 }),
+    audio.se("./assets/click.wav", { startAt: "2s", volume: 1.0 }),
+  ],
+})
+```
+
+### オーディオパラメータ型
+
+| 型 | 関数 | GUI表示 |
+|---|---|---|
+| BGM | `audio.bgm(src, opts)` | 波形付きトラック |
+| 効果音 | `audio.se(src, opts)` | タイムライン上のマーカー |
+| ボリューム | `volume: 0.0〜1.0` | スライダー |
+| フェード | `fadeIn / fadeOut` (秒指定) | トラック上の傾斜表示 |
+
+### MVP でのオーディオ対応
+
+Phase 1 では BGM 1トラックのみ対応（Web Audio API）。
+SE・複数トラックは Phase 2 以降。
+
+---
+
 ## 技術スタック
 
 | レイヤー | 技術 |
@@ -306,13 +379,14 @@ Uint8Array → ブラウザでダウンロード
 - [ ] パラメータパネル（スライダー・テキスト・セレクト）
 - [ ] WebM書き出し（WebCodecs API使用、Rustなし）
 - [ ] 基本エフェクト: `bounce`, `slide`, `zoom`, `fade`
+- [ ] プロジェクト保存/読み込み（JSON形式）
+- [ ] BGMトラック1本（Web Audio API）
 
 ### 含まない機能（フェーズ2以降）
 - キーフレームアニメーション（GUIから）
 - Rustエンコーダ（高速MP4書き出し）
 - 画像/動画アセット読み込み
 - Monaco Editor（コードエディタ統合）
-- プロジェクト保存/読み込み
 
 ---
 
@@ -321,8 +395,8 @@ Uint8Array → ブラウザでダウンロード
 | フェーズ | 内容 | 目標 |
 |---|---|---|
 | **Phase 1: MVP** | シーン定義API + タイムライン + WebM書き出し | 動くものを作る |
-| **Phase 2: 品質** | Rustエンコーダ + MP4対応 + キーフレームGUI | 実用レベル |
-| **Phase 3: ライブラリ** | パーツライブラリ + テンプレート + プロジェクト保存 | 再利用可能な資産を積む |
+| **Phase 2: 品質** | Rustエンコーダ + MP4対応 + キーフレームGUI + SE・複数オーディオトラック | 実用レベル |
+| **Phase 3: ライブラリ** | パーツライブラリ + テンプレート | 再利用可能な資産を積む |
 | **Phase 4: 拡張** | Monaco Editor + アセット管理 + レジストリ公開 | 本格ツール |
 | **Phase 5: AI統合** | Claude Codeでシーン自動生成 + パラメータ提案 | AI-native制作 |
 
