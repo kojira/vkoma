@@ -5,7 +5,7 @@ export default defineConfig({
   timeout: 120_000,
   retries: 0,
   use: {
-    baseURL: "http://localhost:5174",
+    baseURL: "http://localhost:5173",
     browserName: "chromium",
     viewport: { width: 1280, height: 720 },
     launchOptions: {
@@ -13,8 +13,8 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: "npx vite --port 5174",
-    url: "http://localhost:5174",
+    command: "npx vite",
+    url: "http://localhost:5173",
     reuseExistingServer: true,
   },
 });
