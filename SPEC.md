@@ -537,7 +537,8 @@ fallback = "codex"         # メインが利用不可の場合のフォールバ
 | リアルタイム通信 | WebSocket |
 | エンコーダ | Rust (WASM) — mp4rs / webm-rs |
 | AIバックエンド連携 | CLIアダプター（Claude Code / Codex / Cursor / Gemini） |
-| テスト | Vitest + Playwright |
+| テスト（ユニット・統合） | Vitest + Supertest |
+| テスト（E2E） | Playwright |
 
 ---
 
@@ -562,14 +563,56 @@ fallback = "codex"         # メインが利用不可の場合のフォールバ
 
 ---
 
+## テスト方針
+
+### ユニットテスト（Vitest）
+
+コアロジックの正確性を保証する。
+
+- **`defineScene()` API・パラメータスキーマのバリデーション**: 各パラメータ型（`params.string`, `params.number`, `params.color` 等）のデフォルト値・制約（min/max/step）が正しく機能することを検証
+- **AIバックエンドアダプター**: `AIBackendAdapter` インターフェースの各実装（`ClaudeCodeAdapter`, `CodexAdapter`, `CursorAdapter`, `GeminiAdapter`）のコマンド生成・レスポンスパース・`isAvailable()` 判定をテスト
+- **プロジェクトファイルのシリアライズ/デシリアライズ**: `vkoma.toml` の読み書き、シーン構成の復元が正しく行われることを検証
+- **レンダリングロジック**: フレーム計算（progress = frame / duration）、イージング関数（`easeOutBounce` 等）、キーフレーム補間の数値精度を検証
+
+### 統合テスト（Vitest + Supertest）
+
+バックエンドサーバーのAPIとコンポーネント間連携を検証する。
+
+- **バックエンドAPIエンドポイント（プロジェクトCRUD）**: `GET /api/projects`, `POST /api/projects`, `PUT /api/projects/:id/scenes/:name` 等の正常系・異常系レスポンスを検証
+- **AI CLI呼び出しのモック**: 各AIバックエンドアダプターのCLI実行をモックし、プロンプト送信→コード生成→シーン反映のフローをテスト
+- **WebSocket通信**: `/ws` エンドポイントの接続・メッセージ送受信・リアルタイム同期（パラメータ変更→プレビュー更新通知）を検証
+
+### E2Eテスト（Playwright）
+
+ユーザー操作の主要シナリオをブラウザ上で検証する。
+
+- **ビューポート**: スマホ（375×667）・デスクトップ（1920×1080）の両方でテスト実行
+- **主要シナリオ**:
+  1. AIチャットで動画を作成 → プレビュー確認 → 書き出し
+  2. パラメータ調整（スライダー・テキスト入力・セレクト） → リアルタイムプレビュー反映
+  3. プロジェクト保存 → 再読み込み → 作業再開
+- **AI CLIモック**: E2E実行時はAI CLIをモックサーバーで代替し、決定論的なレスポンスを返す
+- **CI**: GitHub Actionsで自動実行（PR作成時・mainブランチマージ時）
+
+### テスト実行
+
+```bash
+pnpm test              # 全テスト実行
+pnpm test:unit         # ユニットテストのみ
+pnpm test:integration  # 統合テストのみ
+pnpm test:e2e          # Playwright E2Eテスト
+pnpm test:e2e:mobile   # スマホビューポートのみ
+pnpm test:e2e:desktop  # デスクトップビューポートのみ
+```
+
 ## フェーズ計画
 
 | フェーズ | 内容 | 目標 |
 |---|---|---|
-| **Phase 1: MVP** | シーン定義API + AIチャットUI + AIバックエンド連携 + タイムライン + WebM書き出し | 動くものを作る |
-| **Phase 2: 品質** | Rustエンコーダ + MP4対応 + キーフレームGUI + SE・複数オーディオトラック | 実用レベル |
-| **Phase 3: ライブラリ** | パーツライブラリ + テンプレート | 再利用可能な資産を積む |
-| **Phase 4: 拡張** | アセット管理 + レジストリ公開 + プラグインシステム | 本格ツール |
+| **Phase 1: MVP** | シーン定義API + AIチャットUI + AIバックエンド連携 + タイムライン + WebM書き出し + ユニットテスト基盤整備 | 動くものを作る |
+| **Phase 2: 品質** | Rustエンコーダ + MP4対応 + キーフレームGUI + SE・複数オーディオトラック + 統合テスト・E2Eテスト整備 | 実用レベル |
+| **Phase 3: ライブラリ** | パーツライブラリ + テンプレート + ライブラリのテストテンプレート | 再利用可能な資産を積む |
+| **Phase 4: 拡張** | アセット管理 + レジストリ公開 + プラグインシステム + プラグインテストAPI | 本格ツール |
 
 ---
 
