@@ -9,6 +9,66 @@ import {
   params as sceneParams,
 } from "./base";
 
+// ---- emoji-aware text rendering ----
+interface TextPart {
+  text: string;
+  isEmoji: boolean;
+}
+
+function splitTextAndEmoji(text: string): TextPart[] {
+  const parts: TextPart[] = [];
+  let lastIndex = 0;
+  const regex = /\p{Emoji_Presentation}|\p{Extended_Pictographic}/gu;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ text: text.slice(lastIndex, match.index), isEmoji: false });
+    }
+    parts.push({ text: match[0], isEmoji: true });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    parts.push({ text: text.slice(lastIndex), isEmoji: false });
+  }
+  return parts;
+}
+
+function drawTextWithEmoji(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  fontWeight: string | number,
+  fontSize: number,
+): void {
+  const parts = splitTextAndEmoji(text);
+  let totalWidth = 0;
+  for (const part of parts) {
+    ctx.font = part.isEmoji
+      ? `${fontSize}px "Apple Color Emoji"`
+      : `${fontWeight} ${fontSize}px sans-serif, "Apple Color Emoji", "Noto Color Emoji", "Segoe UI Emoji"`;
+    totalWidth += ctx.measureText(part.text).width;
+  }
+  const align = ctx.textAlign;
+  let currentX =
+    align === "center"
+      ? x - totalWidth / 2
+      : align === "right"
+        ? x - totalWidth
+        : x;
+  const savedAlign = ctx.textAlign;
+  ctx.textAlign = "left";
+  for (const part of parts) {
+    ctx.font = part.isEmoji
+      ? `${fontSize}px "Apple Color Emoji"`
+      : `${fontWeight} ${fontSize}px sans-serif, "Apple Color Emoji", "Noto Color Emoji", "Segoe UI Emoji"`;
+    ctx.fillText(part.text, currentX, y);
+    currentX += ctx.measureText(part.text).width;
+  }
+  ctx.textAlign = savedAlign;
+}
+// ---- end emoji-aware text rendering ----
+
 const TitleScene = defineScene({
   id: "title-scene",
   name: "Title Scene",
@@ -37,10 +97,9 @@ const TitleScene = defineScene({
 
     ctx.globalAlpha = fade(time, 1.25);
     ctx.fillStyle = params.color;
-    ctx.font = `700 ${params.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(params.text, ctx.canvas.width / 2, ctx.canvas.height / 2);
+    drawTextWithEmoji(ctx, params.text, ctx.canvas.width / 2, ctx.canvas.height / 2, "700", params.fontSize);
     ctx.restore();
   },
 });
@@ -61,10 +120,9 @@ const SubtitleScene = defineScene({
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     const x = slide(time, 1.5, -ctx.canvas.width, ctx.canvas.width / 2);
     ctx.fillStyle = p.color;
-    ctx.font = `600 ${p.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(p.text, x, ctx.canvas.height / 2);
+    drawTextWithEmoji(ctx, p.text, x, ctx.canvas.height / 2, "600", p.fontSize);
   },
 });
 
@@ -81,11 +139,10 @@ const ColorScene = defineScene({
     ctx.fillStyle = `hsl(${hue}, 70%, 50%)`;
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     ctx.fillStyle = "#ffffff";
-    ctx.font = '700 64px "Apple Color Emoji", sans-serif';
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.globalAlpha = 0.8;
-    ctx.fillText("🎨 Colors!", ctx.canvas.width / 2, ctx.canvas.height / 2);
+    drawTextWithEmoji(ctx, "🎨 Colors!", ctx.canvas.width / 2, ctx.canvas.height / 2, "700", 64);
     ctx.globalAlpha = 1;
   },
 });
@@ -107,10 +164,9 @@ const BouncingTextScene = defineScene({
     const b = bounce(time, 2);
     const y = ctx.canvas.height - b * (ctx.canvas.height / 2);
     ctx.fillStyle = p.color;
-    ctx.font = `700 ${p.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(p.text, ctx.canvas.width / 2, y);
+    drawTextWithEmoji(ctx, p.text, ctx.canvas.width / 2, y, "700", p.fontSize);
   },
 });
 
@@ -130,10 +186,9 @@ const OutroScene = defineScene({
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     ctx.globalAlpha = Math.max(0, 1 - fade(time, 3));
     ctx.fillStyle = p.color;
-    ctx.font = `700 ${p.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(p.text, ctx.canvas.width / 2, ctx.canvas.height / 2);
+    drawTextWithEmoji(ctx, p.text, ctx.canvas.width / 2, ctx.canvas.height / 2, "700", p.fontSize);
     ctx.globalAlpha = 1;
   },
 });
@@ -217,10 +272,9 @@ const ZoomInScene = defineScene({
     ctx.translate(ctx.canvas.width / 2, ctx.canvas.height / 2);
     ctx.scale(scale, scale);
     ctx.fillStyle = p.color;
-    ctx.font = `700 ${p.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(p.text, 0, 0);
+    drawTextWithEmoji(ctx, p.text, 0, 0, "700", p.fontSize);
     ctx.restore();
   },
 });
@@ -241,10 +295,9 @@ const SlideInScene = defineScene({
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     const x = slide(time, 1.5, -ctx.canvas.width, ctx.canvas.width / 2);
     ctx.fillStyle = p.color;
-    ctx.font = `700 ${p.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(p.text, x, ctx.canvas.height / 2);
+    drawTextWithEmoji(ctx, p.text, x, ctx.canvas.height / 2, "700", p.fontSize);
   },
 });
 
@@ -264,10 +317,9 @@ const FadeInScene = defineScene({
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     ctx.globalAlpha = fade(time, 1.5);
     ctx.fillStyle = p.color;
-    ctx.font = `700 ${p.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(p.text, ctx.canvas.width / 2, ctx.canvas.height / 2);
+    drawTextWithEmoji(ctx, p.text, ctx.canvas.width / 2, ctx.canvas.height / 2, "700", p.fontSize);
     ctx.globalAlpha = 1;
   },
 });
