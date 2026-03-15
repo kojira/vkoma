@@ -142,7 +142,7 @@ export function createDrawAPI(
     text: (value, x, y, options = {}) => {
       withOpacity(ctx, options.opacity, () => {
         ctx.fillStyle = options.color ?? "#ffffff";
-        ctx.font = options.font ?? "48px sans-serif";
+        ctx.font = options.font ?? '48px sans-serif, "Apple Color Emoji"';
         ctx.textAlign = options.align ?? "left";
         ctx.textBaseline = options.baseline ?? "alphabetic";
         ctx.fillText(value, x, y, options.maxWidth);
