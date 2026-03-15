@@ -4,7 +4,17 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import os from "node:os";
 import path from "node:path";
 import { Hono } from "hono";
-import { chromium } from "playwright-core";
+import { createCanvas } from "@napi-rs/canvas";
+import {
+  type SceneParam,
+  defineScene,
+  params as sceneParams,
+  renderScene,
+  allScenePresets,
+  getSceneFrameRanges,
+  getSceneAtFrame,
+  type SceneItem,
+} from "../../core/src/index";
 
 interface Project {
   id: string;
@@ -12,6 +22,16 @@ interface Project {
   scenes: unknown[];
   createdAt: string;
   updatedAt: string;
+}
+
+interface SavedSceneItem {
+  id: string;
+  name: string;
+  duration: number;
+  params: Record<string, unknown>;
+  sceneConfigId: string;
+  renderCode?: string;
+  sceneConfig?: { id?: string };
 }
 
 const app = new Hono();
@@ -39,6 +59,101 @@ async function writeProject(project: Project) {
   const projectDir = getProjectDir(project.id);
   await mkdir(projectDir, { recursive: true });
   await writeFile(getProjectFile(project.id), JSON.stringify(project, null, 2), "utf8");
+}
+
+function deserializeServerScenes(rawScenes: unknown): SceneItem[] {
+  if (!Array.isArray(rawScenes)) return [];
+
+  return rawScenes
+    .map<SceneItem | null>((scene, index) => {
+      if (!scene || typeof scene !== "object") return null;
+
+      const saved = scene as Partial<SavedSceneItem>;
+      const sceneConfigId = saved.sceneConfigId ?? saved.sceneConfig?.id;
+      let preset = allScenePresets.find((entry) => entry.id === sceneConfigId);
+
+      if (!preset && saved.renderCode && typeof saved.renderCode === "string") {
+        try {
+          const drawFn = new Function("ctx", "params", "time", saved.renderCode) as (
+            ctx: any,
+            params: Record<string, unknown>,
+            time: number,
+          ) => void;
+
+          const paramEntries =
+            saved.params && typeof saved.params === "object" ? Object.entries(saved.params) : [];
+          const defaultParams: Record<string, SceneParam> = {};
+          for (const [key, value] of paramEntries) {
+            if (typeof value === "number") {
+              defaultParams[key] = sceneParams.number(key, value);
+            } else if (typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)) {
+              defaultParams[key] = sceneParams.color(key, value);
+            } else if (typeof value === "string") {
+              defaultParams[key] = sceneParams.string(key, value);
+            }
+          }
+
+          preset = defineScene({
+            id: sceneConfigId || `dynamic-${Date.now()}-${index}`,
+            name: typeof saved.name === "string" ? saved.name : "Dynamic Scene",
+            duration: typeof saved.duration === "number" ? saved.duration : 3,
+            defaultParams,
+            draw: drawFn,
+          });
+        } catch {
+          return null;
+        }
+      }
+
+      if (!preset) return null;
+
+      return {
+        id:
+          typeof saved.id === "string" && saved.id.length > 0
+            ? saved.id
+            : `scene-${Date.now()}-${index}`,
+        name: typeof saved.name === "string" ? saved.name : preset.name,
+        duration: typeof saved.duration === "number" ? Math.max(0.5, saved.duration) : preset.duration,
+        sceneConfig: preset,
+        params: {
+          ...Object.fromEntries(
+            Object.entries(preset.defaultParams).map(([key, param]) => [key, param.default]),
+          ),
+          ...(saved.params && typeof saved.params === "object" ? saved.params : {}),
+        },
+      };
+    })
+    .filter((scene): scene is SceneItem => scene !== null);
+}
+
+async function renderFramesToDisk(
+  scenes: SceneItem[],
+  fps: number,
+  totalFrames: number,
+  tmpDir: string,
+) {
+  const WIDTH = 1920;
+  const HEIGHT = 1080;
+  const canvas = createCanvas(WIDTH, HEIGHT);
+  const ctx = canvas.getContext("2d");
+
+  const writePromises: Promise<void>[] = [];
+
+  for (let frame = 0; frame < totalFrames; frame++) {
+    const hit = getSceneAtFrame(scenes, fps, frame);
+    if (!hit) continue;
+
+    const localFrame = frame - hit.startFrame;
+    const localTime = localFrame / fps;
+
+    renderScene(hit.scene, ctx as any, WIDTH, HEIGHT, localTime);
+
+    const pngBuffer = canvas.toBuffer("image/png");
+    const framePath = path.join(tmpDir, `frame_${String(frame).padStart(6, "0")}.png`);
+    writePromises.push(writeFile(framePath, pngBuffer));
+  }
+
+  await Promise.all(writePromises);
 }
 
 app.get("/api/projects", async (c) => {
@@ -181,7 +296,6 @@ Respond with ONLY a JSON object: {"scenes": [...]}
         }
 
         try {
-          // Claude with --output-format json wraps result in a JSON object with a "result" field
           let parsed: { result?: string };
           try {
             parsed = JSON.parse(stdout);
@@ -191,7 +305,6 @@ Respond with ONLY a JSON object: {"scenes": [...]}
 
           const text = typeof parsed.result === "string" ? parsed.result : stdout;
 
-          // Extract JSON from the text (may be wrapped in markdown code blocks)
           const jsonMatch = text.match(/\{[\s\S]*\}/);
           if (!jsonMatch) {
             send({ error: "Failed to parse AI response", done: true });
@@ -237,12 +350,13 @@ app.get("/api/render/:projectId", async (c) => {
     return c.json({ error: "Project not found" }, 404);
   }
 
-  const scenes = project.scenes as Array<{ duration?: number }>;
-  const totalFrames = scenes.reduce((sum, scene) => {
-    const duration = typeof scene.duration === "number" ? scene.duration : 1;
-    return sum + Math.max(1, Math.round(duration * fps));
-  }, 0);
+  const scenes = deserializeServerScenes(project.scenes);
+  if (scenes.length === 0) {
+    return c.json({ error: "No scenes to render" }, 400);
+  }
 
+  const ranges = getSceneFrameRanges(scenes, fps);
+  const totalFrames = ranges[ranges.length - 1]?.endFrame ?? 0;
   if (totalFrames <= 0) {
     return c.json({ error: "No frames to render" }, 400);
   }
@@ -250,26 +364,18 @@ app.get("/api/render/:projectId", async (c) => {
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "vkoma-render-"));
 
   try {
-    const browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
-
-    await page.goto(`http://localhost:5174/?projectId=${projectId}`, { waitUntil: "networkidle" });
-    await page.waitForFunction(() => typeof (window as any).__vkoma_seekToFrame === "function", null, { timeout: 30_000 });
-
-    for (let frame = 0; frame < totalFrames; frame++) {
-      await page.evaluate(([f, r]) => (window as any).__vkoma_seekToFrame(f, r), [frame, fps] as const);
-      await page.waitForTimeout(16);
-      const canvas = page.locator("canvas");
-      await canvas.screenshot({ path: path.join(tmpDir, `frame_${String(frame).padStart(6, "0")}.png`) });
-    }
-
-    await browser.close();
+    const t0 = Date.now();
+    await renderFramesToDisk(scenes, fps, totalFrames, tmpDir);
+    const t1 = Date.now();
 
     const outputPath = path.join(tmpDir, "output.mp4");
     execSync(
-      `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -pix_fmt yuv420p "${outputPath}"`,
+      `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -preset ultrafast -threads 0 -pix_fmt yuv420p "${outputPath}"`,
       { timeout: 120_000 },
     );
+    const t2 = Date.now();
+
+    console.log(`[GET render] frame capture (${totalFrames} frames): ${t1 - t0}ms, ffmpeg encode: ${t2 - t1}ms, total: ${t2 - t0}ms`);
 
     const mp4Data = await readFile(outputPath);
 
@@ -323,12 +429,13 @@ app.post("/api/render", async (c) => {
     return c.json({ error: "Project not found" }, 404);
   }
 
-  const scenes = project.scenes as Array<{ duration?: number }>;
-  const totalFrames = scenes.reduce((sum, scene) => {
-    const duration = typeof scene.duration === "number" ? scene.duration : 1;
-    return sum + Math.max(1, Math.round(duration * fps));
-  }, 0);
+  const scenes = deserializeServerScenes(project.scenes);
+  if (scenes.length === 0) {
+    return c.json({ error: "No scenes to render" }, 400);
+  }
 
+  const ranges = getSceneFrameRanges(scenes, fps);
+  const totalFrames = ranges[ranges.length - 1]?.endFrame ?? 0;
   if (totalFrames <= 0) {
     return c.json({ error: "No frames to render" }, 400);
   }
@@ -336,37 +443,27 @@ app.post("/api/render", async (c) => {
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "vkoma-render-"));
 
   try {
-    const browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
-
-    await page.goto(`http://localhost:5174/?projectId=${projectId}`, { waitUntil: "networkidle" });
-
-    // Wait for __vkoma_seekToFrame to be defined
-    await page.waitForFunction(() => typeof (window as any).__vkoma_seekToFrame === "function", null, { timeout: 30_000 });
-
-    for (let frame = 0; frame < totalFrames; frame++) {
-      await page.evaluate(([f, r]) => (window as any).__vkoma_seekToFrame(f, r), [frame, fps] as const);
-      await page.waitForTimeout(16);
-      const canvas = page.locator("canvas");
-      await canvas.screenshot({ path: path.join(tmpDir, `frame_${String(frame).padStart(6, "0")}.png`) });
-    }
-
-    await browser.close();
+    const t0 = Date.now();
+    await renderFramesToDisk(scenes, fps, totalFrames, tmpDir);
+    const t1 = Date.now();
 
     const outputPath = path.join(tmpDir, "output.mp4");
     if (bgmData) {
       const bgmPath = path.join(tmpDir, bgmFilename);
       await writeFile(bgmPath, Buffer.from(bgmData));
       execSync(
-        `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -i "${bgmPath}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -c:a aac -shortest -pix_fmt yuv420p "${outputPath}"`,
+        `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -i "${bgmPath}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -preset ultrafast -threads 0 -c:a aac -shortest -pix_fmt yuv420p "${outputPath}"`,
         { timeout: 120_000 },
       );
     } else {
       execSync(
-        `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -pix_fmt yuv420p "${outputPath}"`,
+        `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -preset ultrafast -threads 0 -pix_fmt yuv420p "${outputPath}"`,
         { timeout: 120_000 },
       );
     }
+    const t2 = Date.now();
+
+    console.log(`[POST render] frame capture (${totalFrames} frames): ${t1 - t0}ms, ffmpeg encode: ${t2 - t1}ms, total: ${t2 - t0}ms`);
 
     const mp4Data = await readFile(outputPath);
 
