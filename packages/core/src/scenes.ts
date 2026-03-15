@@ -37,7 +37,7 @@ const TitleScene = defineScene({
 
     ctx.globalAlpha = fade(time, 1.25);
     ctx.fillStyle = params.color;
-    ctx.font = `700 ${params.fontSize}px sans-serif, "Apple Color Emoji"`;
+    ctx.font = `700 ${params.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(params.text, ctx.canvas.width / 2, ctx.canvas.height / 2);
@@ -61,7 +61,7 @@ const SubtitleScene = defineScene({
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     const x = slide(time, 1.5, -ctx.canvas.width, ctx.canvas.width / 2);
     ctx.fillStyle = p.color;
-    ctx.font = `600 ${p.fontSize}px sans-serif, "Apple Color Emoji"`;
+    ctx.font = `600 ${p.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(p.text, x, ctx.canvas.height / 2);
@@ -81,7 +81,7 @@ const ColorScene = defineScene({
     ctx.fillStyle = `hsl(${hue}, 70%, 50%)`;
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     ctx.fillStyle = "#ffffff";
-    ctx.font = '700 64px sans-serif, "Apple Color Emoji"';
+    ctx.font = '700 64px "Apple Color Emoji", sans-serif';
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.globalAlpha = 0.8;
@@ -107,7 +107,7 @@ const BouncingTextScene = defineScene({
     const b = bounce(time, 2);
     const y = ctx.canvas.height - b * (ctx.canvas.height / 2);
     ctx.fillStyle = p.color;
-    ctx.font = `700 ${p.fontSize}px sans-serif, "Apple Color Emoji"`;
+    ctx.font = `700 ${p.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(p.text, ctx.canvas.width / 2, y);
@@ -130,7 +130,7 @@ const OutroScene = defineScene({
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     ctx.globalAlpha = Math.max(0, 1 - fade(time, 3));
     ctx.fillStyle = p.color;
-    ctx.font = `700 ${p.fontSize}px sans-serif, "Apple Color Emoji"`;
+    ctx.font = `700 ${p.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(p.text, ctx.canvas.width / 2, ctx.canvas.height / 2);
@@ -217,7 +217,7 @@ const ZoomInScene = defineScene({
     ctx.translate(ctx.canvas.width / 2, ctx.canvas.height / 2);
     ctx.scale(scale, scale);
     ctx.fillStyle = p.color;
-    ctx.font = `700 ${p.fontSize}px sans-serif, "Apple Color Emoji"`;
+    ctx.font = `700 ${p.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(p.text, 0, 0);
@@ -241,7 +241,7 @@ const SlideInScene = defineScene({
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     const x = slide(time, 1.5, -ctx.canvas.width, ctx.canvas.width / 2);
     ctx.fillStyle = p.color;
-    ctx.font = `700 ${p.fontSize}px sans-serif, "Apple Color Emoji"`;
+    ctx.font = `700 ${p.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(p.text, x, ctx.canvas.height / 2);
@@ -264,7 +264,7 @@ const FadeInScene = defineScene({
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     ctx.globalAlpha = fade(time, 1.5);
     ctx.fillStyle = p.color;
-    ctx.font = `700 ${p.fontSize}px sans-serif, "Apple Color Emoji"`;
+    ctx.font = `700 ${p.fontSize}px "Apple Color Emoji", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(p.text, ctx.canvas.width / 2, ctx.canvas.height / 2);

@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { statSync } from "node:fs";
+import { copyFileSync, statSync, writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
 const API_BASE = "http://localhost:3001";
@@ -47,7 +47,6 @@ test("Emoji text renders correctly in exported video frames", async () => {
 
   // Write MP4 to temp file
   const mp4Path = "/tmp/emoji-render-test.mp4";
-  const { writeFileSync } = await import("node:fs");
   writeFileSync(mp4Path, Buffer.from(mp4Buffer));
 
   // 4. Extract a frame with ffmpeg
@@ -56,10 +55,52 @@ test("Emoji text renders correctly in exported video frames", async () => {
     timeout: 30_000,
   });
 
+  // Save a copy for visual inspection
+  const inspectPath = "/Volumes/2TB/openclaw/workspace/emoji-frame-verify.png";
+  copyFileSync(framePath, inspectPath);
+
   // 5. Assert the frame is a valid PNG with meaningful content
   const frameStats = statSync(framePath);
   expect(frameStats.size).toBeGreaterThan(5000);
 
   const fileInfo = execSync(`file ${framePath}`).toString();
   expect(fileInfo).toContain("PNG");
+
+  // 6. Pixel-level emoji verification using @napi-rs/canvas
+  const { loadImage, createCanvas } = await import(
+    "/Volumes/2TB/openclaw/workspace/projects/vkoma/node_modules/.pnpm/@napi-rs+canvas@0.1.96/node_modules/@napi-rs/canvas"
+  );
+
+  const image = await loadImage(framePath);
+  const canvas = createCanvas(image.width, image.height);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, 0, 0);
+
+  // Sample center region where emoji text is rendered (for 1920x1080 frame)
+  const sampleX = 400;
+  const sampleY = 430;
+  const sampleW = 500;
+  const sampleH = 200;
+  const imageData = ctx.getImageData(sampleX, sampleY, sampleW, sampleH);
+  const pixels = imageData.data;
+
+  let colorfulPixelCount = 0;
+  for (let i = 0; i < pixels.length; i += 4) {
+    const r = pixels[i]!;
+    const g = pixels[i + 1]!;
+    const b = pixels[i + 2]!;
+
+    // Skip near-white pixels
+    if (r > 200 && g > 200 && b > 200) continue;
+    // Skip near-black pixels
+    if (r < 50 && g < 50 && b < 50) continue;
+    // Skip background color #111827 (r≈17, g≈24, b≈39) with ±20 tolerance
+    if (Math.abs(r - 17) < 20 && Math.abs(g - 24) < 20 && Math.abs(b - 39) < 20) continue;
+
+    colorfulPixelCount++;
+  }
+
+  // Emoji characters (⚡🎬) contain bright yellow, orange, and colored pixels.
+  // Tofu boxes are just gray rectangular outlines with no colorful pixels.
+  expect(colorfulPixelCount).toBeGreaterThan(100);
 });
