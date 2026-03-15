@@ -6,7 +6,10 @@ import {
   renderScene,
   allScenePresets,
   getSceneAtFrame,
+  getBeatIntensity,
+  applyBeatEffect,
   type SceneItem,
+  type BeatSyncConfig,
 } from "../../core/src/index";
 
 GlobalFonts.registerFromPath("/System/Library/Fonts/Apple Color Emoji.ttc", "Apple Color Emoji");
@@ -93,7 +96,7 @@ let inputData = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { inputData += chunk; });
 process.stdin.on("end", () => {
-  const { rawScenes, fps, startFrame, endFrame, width, height } = JSON.parse(inputData);
+  const { rawScenes, fps, startFrame, endFrame, width, height, beatTimings } = JSON.parse(inputData);
 
   const scenes = deserializeServerScenes(rawScenes);
   const canvas = createCanvas(width, height);
@@ -109,6 +112,21 @@ process.stdin.on("end", () => {
 
     ctx.clearRect(0, 0, width, height);
     renderScene(hit.scene, ctx as any, width, height, localTime);
+
+    if (beatTimings && beatTimings.length > 0) {
+      const globalTime = frame / fps;
+      const beatIntensity = getBeatIntensity(globalTime, beatTimings, 200);
+      if (beatIntensity > 0.05) {
+        // 1. Beat Pulse (輝くグロー)
+        applyBeatEffect(ctx as any, width, height, beatIntensity, { type: 'kick', effect: 'pulse', intensity: 1.0 });
+        // 2. Hue Rotation (色相オーバーレイ)
+        applyBeatEffect(ctx as any, width, height, beatIntensity, { type: 'bass', effect: 'hue-rotation', intensity: 0.8 });
+        // 3. Particle Burst (放射線)
+        applyBeatEffect(ctx as any, width, height, beatIntensity, { type: 'kick', effect: 'particle-burst', intensity: 1.0 });
+        // 4. Vignette Pulse (周辺減光)
+        applyBeatEffect(ctx as any, width, height, beatIntensity, { type: 'kick', effect: 'vignette', intensity: 1.0 });
+      }
+    }
 
     const jpegBuf = canvas.toBuffer("image/jpeg", 80);
     const lenBuf = Buffer.alloc(4);

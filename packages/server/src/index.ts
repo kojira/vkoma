@@ -16,6 +16,7 @@ import {
   getSceneAtFrame,
   type SceneItem,
 } from "../../core/src/index";
+import { analyzeAudio } from "./audio-analyze.js";
 
 GlobalFonts.registerFromPath("/System/Library/Fonts/Apple Color Emoji.ttc", "Apple Color Emoji");
 
@@ -145,6 +146,7 @@ function renderFramesInWorker(
   endFrame: number,
   width: number,
   height: number,
+  beatTimings?: number[],
 ): Promise<Buffer[]> {
   return new Promise((resolve, reject) => {
     const child = spawn("node", ["--import", "tsx/esm", FRAME_WORKER_PATH], {
@@ -177,7 +179,7 @@ function renderFramesInWorker(
     });
     child.on("error", reject);
 
-    child.stdin.write(JSON.stringify({ rawScenes, fps, startFrame, endFrame, width, height }));
+    child.stdin.write(JSON.stringify({ rawScenes, fps, startFrame, endFrame, width, height, beatTimings }));
     child.stdin.end();
   });
 }
@@ -189,6 +191,7 @@ async function renderVideo(
   totalFrames: number,
   outputPath: string,
   bgmPath?: string,
+  beatTimings?: number[],
 ): Promise<{ frameCaptureMs: number; ffmpegMs: number }> {
   const WIDTH = 1920;
   const HEIGHT = 1080;
@@ -245,7 +248,7 @@ async function renderVideo(
     const end = Math.min(start + framesPerWorker, totalFrames);
     if (start >= totalFrames) break;
     workerPromises.push(
-      renderFramesInWorker(rawScenes, fps, start, end, WIDTH, HEIGHT),
+      renderFramesInWorker(rawScenes, fps, start, end, WIDTH, HEIGHT, beatTimings),
     );
   }
 
@@ -361,6 +364,8 @@ Available preset params:
 - fade-in-scene: text, fontSize, color, bgColor
 
 Optionally, you may include a "renderCode" field with a JavaScript function body (parameters: ctx, params, time) to define a fully custom draw function. When renderCode is provided, the code field can be any unique id. The function body has access to the Canvas 2D context (ctx), the params object, and time in seconds.
+
+When generating scenes for "IrisOut" or "IRIS OUT" band music videos, use: gradient backgrounds + typography with "IRIS OUT" text + particles + geometric shapes (circles, triangles, lines).
 
 Respond with ONLY a JSON object: {"scenes": [...]}
 `;
@@ -566,7 +571,18 @@ app.post("/api/render", async (c) => {
       await writeFile(bgmPath, Buffer.from(bgmData));
     }
 
-    const { frameCaptureMs, ffmpegMs } = await renderVideo(scenes, project.scenes, fps, totalFrames, outputPath, bgmPath);
+    let beatTimings: number[] | undefined;
+    if (bgmPath) {
+      try {
+        const analysis = await analyzeAudio(bgmPath);
+        beatTimings = analysis.kicks;
+        console.log(`[render] Audio analyzed: BPM=${analysis.bpm}, kicks=${analysis.kicks.length}`);
+      } catch (err) {
+        console.warn("[render] Audio analysis failed:", err);
+      }
+    }
+
+    const { frameCaptureMs, ffmpegMs } = await renderVideo(scenes, project.scenes, fps, totalFrames, outputPath, bgmPath, beatTimings);
 
     console.log(`[POST render] frame capture (${totalFrames} frames): ${frameCaptureMs}ms, ffmpeg encode: ${ffmpegMs}ms, total: ${frameCaptureMs + ffmpegMs}ms`);
 
