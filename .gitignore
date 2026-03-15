@@ -6,3 +6,7 @@ dist
 test-output.mp4
 packages/ui/test-results/
 test-output-bgm.mp4
+# Rust build artifacts
+packages/audio-native/target/
+# Keep .node files for local development but can be rebuilt
+# packages/audio-native/*.node

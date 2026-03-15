@@ -1,0 +1,32 @@
+{
+  "name": "@vkoma/audio-native",
+  "version": "0.1.0",
+  "description": "Native Rust FFT audio analysis for vkoma",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "version": "napi version",
+    "prepublishOnly": "napi prepublish -t npm"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0-alpha.0"
+  },
+  "engines": {
+    "node": ">= 10"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "napi": {
+    "binaryName": "audio-native",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin"
+    ]
+  },
+  "license": "MIT"
+}
