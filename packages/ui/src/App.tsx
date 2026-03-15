@@ -30,7 +30,7 @@ export default function App() {
     <div className="min-h-screen bg-gray-900 text-white">
       <Header />
       <main className="flex flex-col gap-4 p-4 lg:flex-row">
-        <ParamPanel />
+        <div className="hidden lg:block"><ParamPanel /></div>
         <section className="flex min-w-0 flex-1 flex-col gap-4">
           <PreviewCanvas />
           <Timeline />

@@ -164,10 +164,24 @@ export function ChatPanel() {
             className={
               message.role === "user"
                 ? "ml-auto max-w-[85%] rounded-2xl rounded-br-sm bg-blue-500 px-3 py-2 text-sm text-white"
-                : "max-w-[85%] rounded-2xl rounded-bl-sm bg-gray-800 px-3 py-2 text-sm text-gray-100"
+                : message.content.startsWith("Error:")
+                  ? "max-w-[85%] rounded-2xl rounded-bl-sm bg-red-900/50 border border-red-500/30 px-3 py-2 text-sm text-red-300"
+                  : "max-w-[85%] rounded-2xl rounded-bl-sm bg-gray-800 px-3 py-2 text-sm text-gray-100"
             }
           >
-            {message.content}
+            {message.content === "Generating..." ? (
+              <span className="flex items-center gap-2">
+                <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                生成中...
+              </span>
+            ) : message.content.startsWith("Error:") ? (
+              <span className="flex items-center gap-1.5">⚠️ {message.content}</span>
+            ) : (
+              message.content
+            )}
           </div>
         ))}
       </div>

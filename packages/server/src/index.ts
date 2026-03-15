@@ -139,8 +139,19 @@ Respond with ONLY a JSON object: {"scenes": [...]}
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
+      let closed = false;
       const send = (obj: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        } catch {
+          closed = true;
+        }
+      };
+      const closeController = () => {
+        if (closed) return;
+        closed = true;
+        try { controller.close(); } catch { /* already closed */ }
       };
 
       const claudePath = process.env.CLAUDE_PATH || "/Users/kojira/.local/bin/claude";
@@ -165,7 +176,7 @@ Respond with ONLY a JSON object: {"scenes": [...]}
       child.on("close", (code) => {
         if (code !== 0) {
           send({ error: stderr || `claude exited with code ${code}`, done: true });
-          controller.close();
+          closeController();
           return;
         }
 
@@ -184,7 +195,7 @@ Respond with ONLY a JSON object: {"scenes": [...]}
           const jsonMatch = text.match(/\{[\s\S]*\}/);
           if (!jsonMatch) {
             send({ error: "Failed to parse AI response", done: true });
-            controller.close();
+            closeController();
             return;
           }
 
@@ -194,12 +205,12 @@ Respond with ONLY a JSON object: {"scenes": [...]}
           const message = err instanceof Error ? err.message : "Unknown error";
           send({ error: message, done: true });
         }
-        controller.close();
+        closeController();
       });
 
       child.on("error", (err) => {
         send({ error: err.message, done: true });
-        controller.close();
+        closeController();
       });
 
       child.stdin.end();
@@ -213,6 +224,64 @@ Respond with ONLY a JSON object: {"scenes": [...]}
       Connection: "keep-alive",
     },
   });
+});
+
+app.get("/api/render/:projectId", async (c) => {
+  const projectId = c.req.param("projectId");
+  const fps = Number(c.req.query("fps") || "30") || 30;
+
+  let project: Project;
+  try {
+    project = await readProject(projectId);
+  } catch {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const scenes = project.scenes as Array<{ duration?: number }>;
+  const totalFrames = scenes.reduce((sum, scene) => {
+    const duration = typeof scene.duration === "number" ? scene.duration : 1;
+    return sum + Math.max(1, Math.round(duration * fps));
+  }, 0);
+
+  if (totalFrames <= 0) {
+    return c.json({ error: "No frames to render" }, 400);
+  }
+
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "vkoma-render-"));
+
+  try {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+
+    await page.goto(`http://localhost:5174/?projectId=${projectId}`, { waitUntil: "networkidle" });
+    await page.waitForFunction(() => typeof (window as any).__vkoma_seekToFrame === "function", null, { timeout: 30_000 });
+
+    for (let frame = 0; frame < totalFrames; frame++) {
+      await page.evaluate(([f, r]) => (window as any).__vkoma_seekToFrame(f, r), [frame, fps] as const);
+      await page.waitForTimeout(16);
+      const canvas = page.locator("canvas");
+      await canvas.screenshot({ path: path.join(tmpDir, `frame_${String(frame).padStart(6, "0")}.png`) });
+    }
+
+    await browser.close();
+
+    const outputPath = path.join(tmpDir, "output.mp4");
+    execSync(
+      `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -pix_fmt yuv420p "${outputPath}"`,
+      { timeout: 120_000 },
+    );
+
+    const mp4Data = await readFile(outputPath);
+
+    return new Response(mp4Data, {
+      headers: {
+        "Content-Type": "video/mp4",
+        "Content-Disposition": `attachment; filename="vkoma-export.mp4"`,
+      },
+    });
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
 });
 
 app.post("/api/render", async (c) => {
@@ -232,6 +301,11 @@ app.post("/api/render", async (c) => {
       bgmData = await bgmFile.arrayBuffer();
       bgmFilename = bgmFile.name || "bgm.wav";
     }
+  } else if (contentType.includes("application/x-www-form-urlencoded")) {
+    const body = await c.req.parseBody();
+    projectId = typeof body.projectId === "string" ? body.projectId : "";
+    const fpsStr = body.fps;
+    if (fpsStr) fps = Number(fpsStr) || 30;
   } else {
     const body = await c.req.json().catch(() => ({}));
     projectId = typeof body.projectId === "string" ? body.projectId : "";
@@ -272,7 +346,7 @@ app.post("/api/render", async (c) => {
 
     for (let frame = 0; frame < totalFrames; frame++) {
       await page.evaluate(([f, r]) => (window as any).__vkoma_seekToFrame(f, r), [frame, fps] as const);
-      await page.waitForTimeout(100);
+      await page.waitForTimeout(16);
       const canvas = page.locator("canvas");
       await canvas.screenshot({ path: path.join(tmpDir, `frame_${String(frame).padStart(6, "0")}.png`) });
     }
