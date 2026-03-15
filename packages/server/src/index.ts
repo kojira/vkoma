@@ -202,9 +202,27 @@ Respond with ONLY a JSON object: {"scenes": [...]}
 });
 
 app.post("/api/render", async (c) => {
-  const body = await c.req.json().catch(() => ({}));
-  const projectId = typeof body.projectId === "string" ? body.projectId : "";
-  const fps = typeof body.fps === "number" ? body.fps : 30;
+  let projectId = "";
+  let fps = 30;
+  let bgmData: ArrayBuffer | null = null;
+  let bgmFilename = "bgm.wav";
+
+  const contentType = c.req.header("content-type") || "";
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await c.req.formData();
+    projectId = (formData.get("projectId") as string) || "";
+    const fpsStr = formData.get("fps");
+    if (fpsStr) fps = Number(fpsStr) || 30;
+    const bgmFile = formData.get("bgm") as File | null;
+    if (bgmFile) {
+      bgmData = await bgmFile.arrayBuffer();
+      bgmFilename = bgmFile.name || "bgm.wav";
+    }
+  } else {
+    const body = await c.req.json().catch(() => ({}));
+    projectId = typeof body.projectId === "string" ? body.projectId : "";
+    fps = typeof body.fps === "number" ? body.fps : 30;
+  }
 
   if (!projectId) {
     return c.json({ error: "projectId is required" }, 400);
@@ -248,10 +266,19 @@ app.post("/api/render", async (c) => {
     await browser.close();
 
     const outputPath = path.join(tmpDir, "output.mp4");
-    execSync(
-      `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -pix_fmt yuv420p "${outputPath}"`,
-      { timeout: 120_000 },
-    );
+    if (bgmData) {
+      const bgmPath = path.join(tmpDir, bgmFilename);
+      await writeFile(bgmPath, Buffer.from(bgmData));
+      execSync(
+        `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -i "${bgmPath}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -c:a aac -shortest -pix_fmt yuv420p "${outputPath}"`,
+        { timeout: 120_000 },
+      );
+    } else {
+      execSync(
+        `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -pix_fmt yuv420p "${outputPath}"`,
+        { timeout: 120_000 },
+      );
+    }
 
     const mp4Data = await readFile(outputPath);
 

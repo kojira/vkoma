@@ -9,7 +9,7 @@ export function Header() {
   const setProjectName = useSceneStore((state) => state.setProjectName);
 
   const exportVideo = async () => {
-    const { currentProjectId } = useSceneStore.getState();
+    const { currentProjectId, bgmFile } = useSceneStore.getState();
     if (!currentProjectId) {
       window.alert("プロジェクトを保存してからエクスポートしてください。");
       return;
@@ -17,11 +17,23 @@ export function Header() {
 
     setExporting(true);
     try {
-      const response = await fetch("/api/render", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: currentProjectId, fps: 30 }),
-      });
+      let response: Response;
+      if (bgmFile) {
+        const formData = new FormData();
+        formData.append("projectId", currentProjectId);
+        formData.append("fps", "30");
+        formData.append("bgm", bgmFile);
+        response = await fetch("/api/render", {
+          method: "POST",
+          body: formData,
+        });
+      } else {
+        response = await fetch("/api/render", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId: currentProjectId, fps: 30 }),
+        });
+      }
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({ error: "Export failed" }));
