@@ -24,6 +24,31 @@ export function Header() {
     }
   }, [exportError]);
 
+  const downloadVideo = async () => {
+    const { currentProjectId } = useSceneStore.getState();
+    if (!currentProjectId) {
+      setExportError("プロジェクトを保存してからダウンロードしてください。");
+      return;
+    }
+    try {
+      const response = await fetch(`/api/projects/${currentProjectId}/download`);
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: "Download failed" }));
+        setExportError((err as { error?: string }).error || "ダウンロード失敗: レンダリングしてからお試しください。");
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${projectName || "vkoma"}.mp4`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportError("Download failed: " + (e instanceof Error ? e.message : "Unknown error"));
+    }
+  };
+
   const exportVideo = async () => {
     const { currentProjectId, bgmFile } = useSceneStore.getState();
     if (!currentProjectId) {
@@ -103,6 +128,14 @@ export function Header() {
         )}
         <button type="button" onClick={() => void saveProject()} disabled={exporting} className="rounded-md border border-gray-700 px-4 py-2 text-sm font-medium text-gray-200 transition hover:border-gray-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60">
           💾 保存
+        </button>
+        <button
+          type="button"
+          data-testid="download-button"
+          onClick={() => void downloadVideo()}
+          className="rounded-md border border-gray-700 px-4 py-2 text-sm font-medium text-gray-200 transition hover:border-gray-500 hover:text-white"
+        >
+          ⬇ ダウンロード
         </button>
         <button type="button" data-testid="export-button" onClick={() => void exportVideo()} disabled={exporting} className="flex items-center gap-2 rounded-md bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:bg-blue-500/60">
           {exporting && (

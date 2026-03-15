@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -559,6 +559,9 @@ app.get("/api/render/:projectId", async (c) => {
 
     console.log(`[GET render] frame capture (${totalFrames} frames): ${frameCaptureMs}ms, ffmpeg encode: ${ffmpegMs}ms, total: ${frameCaptureMs + ffmpegMs}ms`);
 
+    const projectOutputPath = path.join(getProjectDir(projectId), "output.mp4");
+    await copyFile(outputPath, projectOutputPath);
+
     const mp4Data = await readFile(outputPath);
     const totalMs = frameCaptureMs + ffmpegMs;
     const videoDuration = totalFrames / fps;
@@ -578,6 +581,23 @@ app.get("/api/render/:projectId", async (c) => {
   } finally {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
+});
+
+app.get("/api/projects/:id/download", async (c) => {
+  const id = c.req.param("id");
+  const projectOutputPath = path.join(getProjectDir(id), "output.mp4");
+  let mp4Data: Buffer;
+  try {
+    mp4Data = await readFile(projectOutputPath);
+  } catch {
+    return c.json({ error: "No rendered video found. Please export first." }, 404);
+  }
+  return new Response(mp4Data, {
+    headers: {
+      "Content-Type": "video/mp4",
+      "Content-Disposition": `attachment; filename="vkoma-export.mp4"`,
+    },
+  });
 });
 
 app.get("/api/render/:projectId/stream", async (c) => {
