@@ -36,7 +36,7 @@ test.describe("vkoma UI", () => {
 
   test("TitleScene is shown in timeline", async ({ page }) => {
     await page.goto(projectUrl);
-    await expect(page.getByText("Intro").first()).toBeVisible();
+    await expect(page.getByText("Title Scene").first()).toBeVisible();
   });
 
   test("play button toggles playback", async ({ page }) => {
