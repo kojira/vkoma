@@ -445,7 +445,7 @@ export function Timeline() {
             BGM:
             <input
               type="file"
-              accept="audio/*"
+              accept="audio/*,.wav,.mp3,.aac,.ogg,.flac,.m4a"
               data-testid="bgm-input"
               onChange={async (event) => {
                 const file = event.target.files?.[0] ?? null;
