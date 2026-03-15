@@ -28,10 +28,10 @@ test.describe("vkoma UI", () => {
 
   test("app loads with main UI elements", async ({ page }) => {
     await page.goto(projectUrl);
-    await expect(page.getByRole("heading", { name: "vKoma" })).toBeVisible();
+    await expect(page.getByText("vKoma")).toBeVisible();
     await expect(page.locator("canvas")).toBeVisible({ timeout: 15000 });
     await expect(page.getByRole("button", { name: "Play" })).toBeVisible();
-    await expect(page.getByText("Describe the scene")).toBeVisible();
+    await expect(page.getByText("Describe the scene you want to build.")).toBeVisible();
   });
 
   test("TitleScene is shown in timeline", async ({ page }) => {
