@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { Component, useEffect, useRef, type ErrorInfo, type ReactNode } from "react";
 import { renderScene } from "@vkoma/core";
 import { getSceneAtFrame, useSceneStore } from "../stores/sceneStore";
 
@@ -11,6 +11,44 @@ declare global {
 const CANVAS_WIDTH = 1920;
 const CANVAS_HEIGHT = 1080;
 const imageCache = new Map<string, HTMLImageElement>();
+
+type PreviewCanvasBoundaryProps = {
+  children: ReactNode;
+};
+
+type PreviewCanvasBoundaryState = {
+  hasError: boolean;
+};
+
+class PreviewCanvasErrorBoundary extends Component<
+  PreviewCanvasBoundaryProps,
+  PreviewCanvasBoundaryState
+> {
+  state: PreviewCanvasBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): PreviewCanvasBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("PreviewCanvas failed to render", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="w-full rounded-xl border border-red-900/60 bg-gray-950 p-4 shadow-2xl">
+          <div className="flex aspect-video w-full items-center justify-center rounded-lg border border-red-900/60 bg-black px-6 text-center text-sm text-red-200">
+            Preview rendering failed.
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 const toImageUrl = (path: string): string => {
   if (path.startsWith("/") && !path.startsWith("/api/")) {
     const filename = path.split("/").pop() ?? "";
@@ -19,7 +57,7 @@ const toImageUrl = (path: string): string => {
   return path;
 };
 
-export function PreviewCanvas() {
+function PreviewCanvasInner() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -241,5 +279,13 @@ export function PreviewCanvas() {
         />
       </div>
     </div>
+  );
+}
+
+export function PreviewCanvas() {
+  return (
+    <PreviewCanvasErrorBoundary>
+      <PreviewCanvasInner />
+    </PreviewCanvasErrorBoundary>
   );
 }
