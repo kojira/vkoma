@@ -137,7 +137,7 @@ test("Export video with BGM audio track via API", async ({ page }) => {
 
   // Set BGM file
   const bgmInput = page.getByTestId("bgm-input");
-  const testBgmPath = path.resolve(__dirname, "fixtures", "test-bgm.wav");
+  const testBgmPath = path.resolve(__dirname, "fixtures", "bgm-real.mp3");
   await bgmInput.setInputFiles(testBgmPath);
 
   // Save project
@@ -149,11 +149,11 @@ test("Export video with BGM audio track via API", async ({ page }) => {
 
   // Export with BGM via POST /api/render (FormData with Node.js native fetch)
   const bgmBytes = readFileSync(testBgmPath);
-  const bgmBlob = new Blob([bgmBytes], { type: "audio/wav" });
+  const bgmBlob = new Blob([bgmBytes], { type: "audio/mpeg" });
   const formData = new FormData();
   formData.append("projectId", projectId);
   formData.append("fps", "30");
-  formData.append("bgm", bgmBlob, "test-bgm.wav");
+  formData.append("bgm", bgmBlob, "bgm-real.mp3");
 
   const renderRes = await fetch(`${API_BASE}/api/render`, {
     method: "POST",
