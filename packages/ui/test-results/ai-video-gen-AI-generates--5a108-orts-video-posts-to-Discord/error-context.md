@@ -1,0 +1,85 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - button "← プロジェクト一覧" [ref=e6]
+      - button "vKoma - Test Project" [ref=e7]
+    - generic [ref=e8]:
+      - button "💾 保存" [disabled] [ref=e9]
+      - button "Exporting..." [disabled] [ref=e10]
+  - main [ref=e11]:
+    - complementary [ref=e12]:
+      - generic [ref=e13]:
+        - heading "Parameters" [level=2] [ref=e14]
+        - generic [ref=e15]:
+          - generic [ref=e16]: 赤い丸が動く
+          - generic [ref=e17]:
+            - text: Duration
+            - generic [ref=e18]:
+              - slider "Duration 5.0s" [ref=e19]: "5"
+              - generic [ref=e20]: 5.0s
+      - generic [ref=e21]:
+        - generic [ref=e22]:
+          - text: Title Text
+          - textbox "Title Text" [ref=e23]: vKoma
+        - generic [ref=e24]:
+          - text: Font Size
+          - generic [ref=e25]:
+            - slider "Font Size 72" [ref=e26]: "72"
+            - generic [ref=e27]: "72"
+        - generic [ref=e28]:
+          - text: Text Color
+          - textbox "Text Color" [ref=e29]: "#ffffff"
+        - generic [ref=e30]:
+          - text: Background
+          - textbox "Background" [ref=e31]: "#1a1a2e"
+    - generic [ref=e36]:
+      - generic [ref=e37]:
+        - generic [ref=e38]:
+          - button "Play" [ref=e39]
+          - button "Reset" [ref=e40]
+        - generic [ref=e41]:
+          - generic [ref=e42]: 00:00 / 00:25
+          - generic [ref=e43]: Frame 1
+      - slider [ref=e45] [cursor=pointer]: "0"
+      - generic [ref=e48]:
+        - button "赤い丸が動く 5.0s" [ref=e49]:
+          - generic [ref=e50]:
+            - generic [ref=e51]: 赤い丸が動く
+            - generic [ref=e52]: 5.0s
+        - button "青い四角が回転する 5.0s" [ref=e55]:
+          - generic [ref=e56]:
+            - generic [ref=e57]: 青い四角が回転する
+            - generic [ref=e58]: 5.0s
+        - button "テキストアニメーション 5.0s" [ref=e61]:
+          - generic [ref=e62]:
+            - generic [ref=e63]: テキストアニメーション
+            - generic [ref=e64]: 5.0s
+        - button "パーティクルエフェクト 5.0s" [ref=e67]:
+          - generic [ref=e68]:
+            - generic [ref=e69]: パーティクルエフェクト
+            - generic [ref=e70]: 5.0s
+        - button "グラデーション背景 5.0s" [ref=e73]:
+          - generic [ref=e74]:
+            - generic [ref=e75]: グラデーション背景
+            - generic [ref=e76]: 5.0s
+      - generic [ref=e79]:
+        - generic [ref=e80]:
+          - button "Add Scene" [ref=e81]
+          - button "Remove Scene" [ref=e82]
+        - generic [ref=e84]:
+          - text: "BGM:"
+          - button "BGM:" [ref=e85]
+        - generic [ref=e86]: 赤い丸が動く selected
+    - complementary [ref=e87]:
+      - heading "AI Chat" [level=2] [ref=e89]
+      - generic [ref=e90]:
+        - generic [ref=e91]: Describe the scene you want to build.
+        - generic [ref=e92]: 赤い丸が動くシーン・青い四角が回転するシーン・テキストアニメのシーン・パーティクルエフェクトのシーン・グラデーション背景のシーン、合計5つのシーンを作って
+        - generic [ref=e93]: Generated 5 scene(s).
+      - generic [ref=e95]:
+        - textbox "Ask AI to generate a scene..." [ref=e96]
+        - button "Send" [disabled] [ref=e97]
+```

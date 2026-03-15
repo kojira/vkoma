@@ -114,8 +114,22 @@ Each scene must have these fields:
 - id: a unique string identifier (e.g. "scene-title-1")
 - name: display name for the scene
 - duration: duration in seconds (number)
-- params: object with scene parameters (text, fontSize, color, bgColor, etc.)
-- code: the scene type id, one of: "title-scene", "subtitle-scene", "color-scene", "bouncing-text-scene", "outro-scene"
+- params: object with scene parameters — MUST include at least 3 parameters per scene
+- code: the scene type id, one of: "title-scene", "subtitle-scene", "color-scene", "bouncing-text-scene", "outro-scene", "particles-scene", "gradient-scene", "zoom-in-scene", "slide-in-scene", "fade-in-scene"
+
+Available preset params:
+- title-scene: text, fontSize, color, bgColor
+- subtitle-scene: text, fontSize, color, bgColor
+- color-scene: speed
+- bouncing-text-scene: text, fontSize, color, bgColor
+- outro-scene: text, fontSize, color, bgColor
+- particles-scene: count, speed, color, bgColor
+- gradient-scene: color1, color2, speed
+- zoom-in-scene: text, fontSize, color, bgColor
+- slide-in-scene: text, fontSize, color, bgColor
+- fade-in-scene: text, fontSize, color, bgColor
+
+Optionally, you may include a "renderCode" field with a JavaScript function body (parameters: ctx, params, time) to define a fully custom draw function. When renderCode is provided, the code field can be any unique id. The function body has access to the Canvas 2D context (ctx), the params object, and time in seconds.
 
 Respond with ONLY a JSON object: {"scenes": [...]}
 `;
