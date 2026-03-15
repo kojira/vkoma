@@ -71,6 +71,7 @@ function PreviewCanvasInner() {
   const currentFrame = useSceneStore((state) => state.currentFrame);
   const isPlaying = useSceneStore((state) => state.isPlaying);
   const fps = useSceneStore((state) => state.fps);
+  const fftCache = useSceneStore((state) => state.fftCache);
   const setCurrentFrame = useSceneStore((state) => state.setCurrentFrame);
   const setCurrentScene = useSceneStore((state) => state.setCurrentScene);
 
@@ -104,7 +105,18 @@ function PreviewCanvasInner() {
       typeof range.scene.params?.bgImagePath === "string" ? range.scene.params.bgImagePath : "";
 
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    renderScene(range.scene, ctx, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
+    const fftFrame = fftCache?.frames[currentFrame];
+    const sceneForRender = fftFrame
+      ? {
+          ...range.scene,
+          params: {
+            ...range.scene.params,
+            fftBands: fftFrame.bands,
+            beatIntensity: fftFrame.beatIntensity,
+          },
+        }
+      : range.scene;
+    renderScene(sceneForRender, ctx, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
 
     if (bgImagePath) {
       const imageUrl = toImageUrl(bgImagePath);
@@ -119,7 +131,7 @@ function PreviewCanvasInner() {
           const ctx2 = canvas?.getContext("2d");
           if (!ctx2) return;
           ctx2.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-          renderScene(range.scene, ctx2, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
+          renderScene(sceneForRender, ctx2, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
           try {
             ctx2.globalCompositeOperation = "destination-over";
             ctx2.drawImage(image!, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -140,7 +152,7 @@ function PreviewCanvasInner() {
         }
       }
     }
-  }, [currentFrame, currentSceneIndex, fps, scenes, setCurrentScene]);
+  }, [currentFrame, currentSceneIndex, fftCache, fps, scenes, setCurrentScene]);
 
   useEffect(() => {
     if (!audioRef.current) {

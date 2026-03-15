@@ -428,6 +428,23 @@ app.post("/api/projects/:id/bgm", async (c) => {
 
   const arrayBuffer = await bgmFile.arrayBuffer();
   await writeFile(bgmPath, Buffer.from(arrayBuffer));
+
+  // FFT解析を非同期で実行してキャッシュ保存（エラーは無視）
+  (async () => {
+    try {
+      const analyzer = createAudioAnalyzer(bgmPath, { bands: 32, fps: 30 });
+      const frames: Array<{ bands: number[]; beatIntensity: number }> = [];
+      for (let i = 0; i < analyzer.totalFrames; i++) {
+        const fd = analyzer.getFrame(i);
+        frames.push({ bands: fd.bands, beatIntensity: fd.beatIntensity });
+      }
+      const cachePath = path.join(projectDir, "fft-cache.json");
+      await writeFile(cachePath, JSON.stringify({ frames }), "utf8");
+    } catch (e) {
+      console.error("[FFT cache] failed", e);
+    }
+  })();
+
   return c.json({ bgmPath: `/api/projects/${id}/bgm` });
 });
 
@@ -456,6 +473,17 @@ app.get("/api/projects/:id/bgm", async (c) => {
     return new Response(data, {
       headers: { "Content-Type": contentType },
     });
+  } catch {
+    return c.json({ error: "Not found" }, 404);
+  }
+});
+
+app.get("/api/projects/:id/fft-cache", async (c) => {
+  const id = c.req.param("id");
+  const cachePath = path.join(getProjectDir(id), "fft-cache.json");
+  try {
+    const data = await readFile(cachePath, "utf8");
+    return c.json(JSON.parse(data));
   } catch {
     return c.json({ error: "Not found" }, 404);
   }

@@ -28,6 +28,7 @@ interface SceneStore {
   currentProjectId: string | null;
   projectName: string;
   bgmFile: File | null;
+  fftCache: { frames: Array<{ bands: number[]; beatIntensity: number }> } | null;
   currentSceneIndex: number;
   isPlaying: boolean;
   currentFrame: number;
@@ -48,6 +49,7 @@ interface SceneStore {
   reorderScenes: (fromIndex: number, toIndex: number) => void;
   updateSceneDuration: (id: string, duration: number) => void;
   setBgmFile: (file: File | null) => void;
+  setFftCache: (cache: { frames: Array<{ bands: number[]; beatIntensity: number }> } | null) => void;
 }
 
 const TitleScene = allScenePresets[0];
@@ -182,6 +184,7 @@ export const useSceneStore = create<SceneStore>()(
       currentProjectId: null,
       projectName: "",
       bgmFile: null,
+      fftCache: null,
       currentSceneIndex: 0,
       isPlaying: false,
       currentFrame: 0,
@@ -227,6 +230,18 @@ export const useSceneStore = create<SceneStore>()(
           }
         } catch {
           // BGMなしは正常
+        }
+        // fft-cacheを自動取得
+        try {
+          const fftResponse = await fetch(`/api/projects/${id}/fft-cache`);
+          if (fftResponse.ok) {
+            const fftData = await fftResponse.json() as { frames: Array<{ bands: number[]; beatIntensity: number }> };
+            set(() => ({ fftCache: fftData }));
+          } else {
+            set(() => ({ fftCache: null }));
+          }
+        } catch {
+          set(() => ({ fftCache: null }));
         }
       },
       saveProject: async () => {
@@ -400,6 +415,7 @@ export const useSceneStore = create<SceneStore>()(
           };
         }),
       setBgmFile: (file) => set(() => ({ bgmFile: file })),
+      setFftCache: (cache) => set(() => ({ fftCache: cache })),
       updateSceneDuration: (id, duration) =>
         set((state) => {
           const scenes = state.scenes.map((scene) =>
