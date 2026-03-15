@@ -122,50 +122,83 @@ Respond with ONLY a JSON object: {"scenes": [...]}
 
   const fullPrompt = systemPrompt + "\n\nUser request: " + userPrompt;
 
-  try {
-    const result = await new Promise<string>((resolve, reject) => {
+  const stream = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      const send = (obj: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      };
+
       const claudePath = process.env.CLAUDE_PATH || "/Users/kojira/.local/bin/claude";
       const child = spawn(claudePath, ["-p", fullPrompt, "--output-format", "json"], {
-        timeout: 60_000,
+        timeout: 120_000,
         stdio: ["pipe", "pipe", "pipe"],
       });
+
       let stdout = "";
       let stderr = "";
-      child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
-      child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+
+      child.stdout.on("data", (data: Buffer) => {
+        const chunk = data.toString();
+        stdout += chunk;
+        send({ chunk });
+      });
+
+      child.stderr.on("data", (data: Buffer) => {
+        stderr += data.toString();
+      });
+
       child.on("close", (code) => {
         if (code !== 0) {
-          reject(new Error(stderr || `claude exited with code ${code}`));
-        } else {
-          resolve(stdout);
+          send({ error: stderr || `claude exited with code ${code}`, done: true });
+          controller.close();
+          return;
         }
+
+        try {
+          // Claude with --output-format json wraps result in a JSON object with a "result" field
+          let parsed: { result?: string };
+          try {
+            parsed = JSON.parse(stdout);
+          } catch {
+            parsed = { result: stdout };
+          }
+
+          const text = typeof parsed.result === "string" ? parsed.result : stdout;
+
+          // Extract JSON from the text (may be wrapped in markdown code blocks)
+          const jsonMatch = text.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) {
+            send({ error: "Failed to parse AI response", done: true });
+            controller.close();
+            return;
+          }
+
+          const generated = JSON.parse(jsonMatch[0]) as { scenes?: unknown[] };
+          send({ scenes: generated.scenes ?? [], done: true });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          send({ error: message, done: true });
+        }
+        controller.close();
       });
-      child.on("error", (err) => reject(err));
+
+      child.on("error", (err) => {
+        send({ error: err.message, done: true });
+        controller.close();
+      });
+
       child.stdin.end();
-    });
+    },
+  });
 
-    // Claude with --output-format json wraps result in a JSON object with a "result" field
-    let parsed: { result?: string };
-    try {
-      parsed = JSON.parse(result);
-    } catch {
-      parsed = { result };
-    }
-
-    const text = typeof parsed.result === "string" ? parsed.result : result;
-
-    // Extract JSON from the text (may be wrapped in markdown code blocks)
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return c.json({ error: "Failed to parse AI response" }, 500);
-    }
-
-    const generated = JSON.parse(jsonMatch[0]) as { scenes?: unknown[] };
-    return c.json({ scenes: generated.scenes ?? [], bgmUrl: null });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return c.json({ error: message }, 500);
-  }
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 });
 
 app.post("/api/render", async (c) => {

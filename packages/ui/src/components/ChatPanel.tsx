@@ -35,6 +35,12 @@ export function ChatPanel() {
       { id: `user-${nextId.current++}`, role: "user", content: value },
     ]);
 
+    const streamingMsgId = `assistant-${nextId.current++}`;
+    setMessages((current) => [
+      ...current,
+      { id: streamingMsgId, role: "assistant", content: "Generating..." },
+    ]);
+
     try {
       const response = await fetch("/api/ai/generate", {
         method: "POST",
@@ -45,67 +51,100 @@ export function ChatPanel() {
         }),
       });
 
-      const data = (await response.json()) as { scenes?: Array<{ id?: string; name?: string; duration?: number; params?: Record<string, unknown>; code?: string }>; error?: string };
-
-      if (!response.ok || data.error) {
-        setMessages((current) => [
-          ...current,
-          {
-            id: `assistant-${nextId.current++}`,
-            role: "assistant",
-            content: `Error: ${data.error ?? "Request failed"}`,
-          },
-        ]);
+      if (!response.ok || !response.body) {
+        setMessages((current) =>
+          current.map((m) =>
+            m.id === streamingMsgId ? { ...m, content: "Error: Request failed" } : m,
+          ),
+        );
         return;
       }
 
-      const scenes = data.scenes ?? [];
-      const addScene = useSceneStore.getState().addScene;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-      // Clear existing scenes first, then add generated ones
-      const store = useSceneStore.getState();
-      if (scenes.length > 0) {
-        // Remove all existing scenes except the first (store requires at least 1)
-        for (const s of store.scenes.slice(1)) {
-          useSceneStore.getState().removeScene(s.id);
-        }
-        // Update the first scene with the first generated scene
-        const first = scenes[0];
-        if (first) {
-          useSceneStore.getState().updateScene(store.scenes[0].id, {
-            name: first.name ?? "Scene",
-            duration: first.duration ?? 3,
-            params: first.params ?? {},
-          });
-        }
-        // Add the remaining scenes
-        for (const scene of scenes.slice(1)) {
-          addScene({
-            id: scene.id ?? `scene-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            name: scene.name ?? "Scene",
-            duration: scene.duration ?? 3,
-            params: scene.params ?? {},
-          });
+      for (;;) {
+        const { done: readerDone, value: chunk } = await reader.read();
+        if (readerDone) break;
+
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6);
+          let event: { chunk?: string; scenes?: Array<{ id?: string; name?: string; duration?: number; params?: Record<string, unknown>; code?: string }>; error?: string; done?: boolean };
+          try {
+            event = JSON.parse(jsonStr);
+          } catch {
+            continue;
+          }
+
+          if (event.chunk) {
+            setMessages((current) =>
+              current.map((m) =>
+                m.id === streamingMsgId ? { ...m, content: "Generating..." } : m,
+              ),
+            );
+          }
+
+          if (event.done) {
+            if (event.error) {
+              setMessages((current) =>
+                current.map((m) =>
+                  m.id === streamingMsgId ? { ...m, content: `Error: ${event.error}` } : m,
+                ),
+              );
+              return;
+            }
+
+            const scenes = event.scenes ?? [];
+            const addScene = useSceneStore.getState().addScene;
+
+            // Clear existing scenes first, then add generated ones
+            const store = useSceneStore.getState();
+            if (scenes.length > 0) {
+              for (const s of store.scenes.slice(1)) {
+                useSceneStore.getState().removeScene(s.id);
+              }
+              const first = scenes[0];
+              if (first) {
+                useSceneStore.getState().updateScene(store.scenes[0].id, {
+                  name: first.name ?? "Scene",
+                  duration: first.duration ?? 3,
+                  params: first.params ?? {},
+                });
+              }
+              for (const scene of scenes.slice(1)) {
+                addScene({
+                  id: scene.id ?? `scene-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                  name: scene.name ?? "Scene",
+                  duration: scene.duration ?? 3,
+                  params: scene.params ?? {},
+                });
+              }
+            }
+
+            setMessages((current) =>
+              current.map((m) =>
+                m.id === streamingMsgId
+                  ? { ...m, content: `Generated ${scenes.length} scene(s).` }
+                  : m,
+              ),
+            );
+          }
         }
       }
-
-      setMessages((current) => [
-        ...current,
-        {
-          id: `assistant-${nextId.current++}`,
-          role: "assistant",
-          content: `Generated ${scenes.length} scene(s).`,
-        },
-      ]);
     } catch (error) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: `assistant-${nextId.current++}`,
-          role: "assistant",
-          content: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-        },
-      ]);
+      setMessages((current) =>
+        current.map((m) =>
+          m.id === streamingMsgId
+            ? { ...m, content: `Error: ${error instanceof Error ? error.message : "Unknown error"}` }
+            : m,
+        ),
+      );
     } finally {
       setIsSending(false);
     }

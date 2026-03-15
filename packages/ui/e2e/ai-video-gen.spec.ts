@@ -17,23 +17,27 @@ test("AI generates scenes with unique marker, exports video, posts to Discord", 
   // Wait for main editor to load after project creation
   await page.getByTestId("chat-input").waitFor({ state: "visible", timeout: 30_000 });
 
-  // Fill chat input with a prompt that includes a unique marker
+  // Fill chat input with a prompt
   const chatInput = page.getByTestId("chat-input");
-  await chatInput.fill("タイトルを'E2E_TEST_OK_99999'にしたシーンを1つ作って");
+  await chatInput.fill("赤い丸が動くシーン・青い四角が回転するシーン・テキストアニメのシーン・パーティクルエフェクトのシーン・グラデーション背景のシーン、合計5つのシーンを作って");
 
   const chatSend = page.getByTestId("chat-send");
-
-  const responsePromise = page.waitForResponse(
-    resp => resp.url().includes('/api/ai/generate') && resp.status() === 200,
-    { timeout: 90_000 }
-  );
-
   await chatSend.click();
 
-  const aiResponse = await responsePromise;
-  const aiData = await aiResponse.json();
-  expect(aiData.scenes).toBeDefined();
-  expect(aiData.scenes.length).toBeGreaterThan(0);
+  // Wait for SSE response to complete - scene buttons appear in the timeline
+  await page.waitForFunction(
+    () => {
+      const buttons = document.querySelectorAll("button");
+      let sceneCount = 0;
+      buttons.forEach((b) => {
+        if (b.textContent && /\d+\.\d+s/.test(b.textContent) && b.textContent !== "Title Scene 4.0s")
+          sceneCount++;
+      });
+      return sceneCount >= 3;
+    },
+    { timeout: 180_000 },
+  );
+
   await page.waitForTimeout(2000);
 
   // Save the project first (required for server-side export)
@@ -41,13 +45,12 @@ test("AI generates scenes with unique marker, exports video, posts to Discord", 
   await page.waitForTimeout(2000);
 
   // Export video - server returns MP4 directly
-  // Handle any alert dialogs that might appear during export
   page.on("dialog", (d) => d.dismiss().catch(() => {}));
   const downloadPromise = page.waitForEvent("download", { timeout: 180_000 });
   await page.getByTestId("export-button").click();
 
   const download = await downloadPromise;
-  const mp4Path = "/tmp/vkoma-ai-export.mp4";
+  const mp4Path = "/Volumes/2TB/openclaw/workspace/projects/vkoma/test-output.mp4";
   await download.saveAs(mp4Path);
 
   expect(existsSync(mp4Path)).toBe(true);
