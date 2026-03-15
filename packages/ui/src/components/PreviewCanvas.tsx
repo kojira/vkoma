@@ -11,6 +11,13 @@ declare global {
 const CANVAS_WIDTH = 1920;
 const CANVAS_HEIGHT = 1080;
 const imageCache = new Map<string, HTMLImageElement>();
+const toImageUrl = (path: string): string => {
+  if (path.startsWith("/") && !path.startsWith("/api/")) {
+    const filename = path.split("/").pop() ?? "";
+    return `/api/mv-assets/${encodeURIComponent(filename)}`;
+  }
+  return path;
+};
 
 export function PreviewCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -62,17 +69,37 @@ export function PreviewCanvas() {
     renderScene(range.scene, ctx, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
 
     if (bgImagePath) {
-      let image = imageCache.get(bgImagePath);
+      const imageUrl = toImageUrl(bgImagePath);
+      let image = imageCache.get(imageUrl);
       if (!image) {
         image = new Image();
-        image.src = bgImagePath;
-        imageCache.set(bgImagePath, image);
+        image.src = imageUrl;
+        imageCache.set(imageUrl, image);
+        image.onload = () => {
+          // Trigger re-render when image loads
+          const canvas = canvasRef.current;
+          const ctx2 = canvas?.getContext("2d");
+          if (!ctx2) return;
+          ctx2.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+          renderScene(range.scene, ctx2, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
+          try {
+            ctx2.globalCompositeOperation = "destination-over";
+            ctx2.drawImage(image!, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            ctx2.globalCompositeOperation = "source-over";
+          } catch {
+            // Ignore broken image errors
+          }
+        };
       }
 
-      if (image.complete) {
-        ctx.globalCompositeOperation = "destination-over";
-        ctx.drawImage(image, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-        ctx.globalCompositeOperation = "source-over";
+      if (image.complete && image.naturalWidth > 0) {
+        try {
+          ctx.globalCompositeOperation = "destination-over";
+          ctx.drawImage(image, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+          ctx.globalCompositeOperation = "source-over";
+        } catch {
+          // Ignore drawImage errors (e.g. Safari DOMException for broken images)
+        }
       }
     }
   }, [currentFrame, currentSceneIndex, fps, scenes, setCurrentScene]);

@@ -51,6 +51,33 @@ interface SavedSceneItem {
 
 const app = new Hono();
 const projectsRoot = path.join(os.homedir(), "vkoma-projects");
+const MV_ASSETS_DIR = "/Volumes/2TB/openclaw/workspace/projects/vkoma/mv-assets";
+
+app.get("/api/mv-assets/:filename", async (c) => {
+  const filename = c.req.param("filename");
+  if (filename.includes("..") || filename.includes("/")) {
+    return c.text("Forbidden", 403);
+  }
+
+  const filepath = path.join(MV_ASSETS_DIR, filename);
+  try {
+    const data = await readFile(filepath);
+    const ext = path.extname(filename).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".gif": "image/gif",
+      ".webp": "image/webp",
+    };
+    const contentType = mimeTypes[ext] ?? "application/octet-stream";
+    return new Response(data, {
+      headers: { "Content-Type": contentType },
+    });
+  } catch {
+    return c.text("Not Found", 404);
+  }
+});
 
 function getProjectDir(id: string) {
   return path.join(projectsRoot, id);
