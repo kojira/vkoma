@@ -95,8 +95,17 @@ function deserializeServerScenes(rawScenes: unknown): SceneItem[] {
 let inputData = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { inputData += chunk; });
-process.stdin.on("end", () => {
-  const { rawScenes, fps, startFrame, endFrame, width, height, beatTimings } = JSON.parse(inputData);
+process.stdin.on("end", async () => {
+  const { rawScenes, fps, startFrame, endFrame, width, height, beatTimings, precomputedFftData } = JSON.parse(inputData) as {
+    rawScenes: unknown[];
+    fps: number;
+    startFrame: number;
+    endFrame: number;
+    width: number;
+    height: number;
+    beatTimings?: number[];
+    precomputedFftData?: Array<{ bands: number[]; beat: boolean; beatIntensity: number; rms: number }>;
+  };
 
   const scenes = deserializeServerScenes(rawScenes);
   const canvas = createCanvas(width, height);
@@ -109,6 +118,19 @@ process.stdin.on("end", () => {
 
     const localFrame = frame - hit.startFrame;
     const localTime = localFrame / fps;
+
+    // Inject FFT data for equalizer scenes
+    if (precomputedFftData && hit.scene.sceneConfig.id === "equalizer-scene") {
+      const frameIndex = frame - startFrame;
+      const fftData = precomputedFftData[frameIndex];
+      if (fftData) {
+        hit.scene.params = {
+          ...hit.scene.params,
+          fftBands: JSON.stringify(fftData.bands),
+          beatIntensity: fftData.beatIntensity,
+        };
+      }
+    }
 
     ctx.clearRect(0, 0, width, height);
     renderScene(hit.scene, ctx as any, width, height, localTime);

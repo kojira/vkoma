@@ -17,6 +17,7 @@ import {
   type SceneItem,
 } from "../../core/src/index";
 import { analyzeAudio } from "./audio-analyze.js";
+import { createAudioAnalyzer } from '../../audio/src/index.js';
 
 GlobalFonts.registerFromPath("/System/Library/Fonts/Apple Color Emoji.ttc", "Apple Color Emoji");
 
@@ -139,6 +140,13 @@ function getWorkerCount(): number {
   return Math.max(1, Math.min(8, cpus - 1));
 }
 
+interface FftFrameData {
+  bands: number[];
+  beat: boolean;
+  beatIntensity: number;
+  rms: number;
+}
+
 function renderFramesInWorker(
   rawScenes: unknown[],
   fps: number,
@@ -147,6 +155,7 @@ function renderFramesInWorker(
   width: number,
   height: number,
   beatTimings?: number[],
+  precomputedFftData?: FftFrameData[],
 ): Promise<Buffer[]> {
   return new Promise((resolve, reject) => {
     const child = spawn("node", ["--import", "tsx/esm", FRAME_WORKER_PATH], {
@@ -179,7 +188,7 @@ function renderFramesInWorker(
     });
     child.on("error", reject);
 
-    child.stdin.write(JSON.stringify({ rawScenes, fps, startFrame, endFrame, width, height, beatTimings }));
+    child.stdin.write(JSON.stringify({ rawScenes, fps, startFrame, endFrame, width, height, beatTimings, precomputedFftData }));
     child.stdin.end();
   });
 }
@@ -238,6 +247,20 @@ async function renderVideo(
 
   const t0 = Date.now();
 
+  // Precompute FFT data on main thread if BGM is provided
+  let fftFrameData: FftFrameData[] | undefined;
+  if (bgmPath) {
+    try {
+      const analyzer = createAudioAnalyzer(bgmPath, { bands: 32, fps });
+      fftFrameData = [];
+      for (let i = 0; i < totalFrames; i++) {
+        fftFrameData.push(analyzer.getFrame(i));
+      }
+    } catch (e) {
+      console.warn("[renderVideo] FFT precompute failed:", e);
+    }
+  }
+
   // Parallel frame rendering with worker_threads
   const workerCount = Math.min(getWorkerCount(), totalFrames);
   const framesPerWorker = Math.ceil(totalFrames / workerCount);
@@ -248,7 +271,7 @@ async function renderVideo(
     const end = Math.min(start + framesPerWorker, totalFrames);
     if (start >= totalFrames) break;
     workerPromises.push(
-      renderFramesInWorker(rawScenes, fps, start, end, WIDTH, HEIGHT, beatTimings),
+      renderFramesInWorker(rawScenes, fps, start, end, WIDTH, HEIGHT, beatTimings, fftFrameData?.slice(start, end)),
     );
   }
 
