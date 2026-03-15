@@ -46,7 +46,7 @@ function drawTextWithEmoji(
   for (const part of parts) {
     ctx.font = part.isEmoji
       ? `${fontSize}px "Apple Color Emoji"`
-      : `${fontWeight} ${fontSize}px sans-serif, "Apple Color Emoji", "Noto Color Emoji", "Segoe UI Emoji"`;
+      : `${fontWeight} ${fontSize}px Helvetica, AppleSDGothicNeo, "Apple Color Emoji"`;
     totalWidth += ctx.measureText(part.text).width;
   }
   const align = ctx.textAlign;
@@ -61,7 +61,7 @@ function drawTextWithEmoji(
   for (const part of parts) {
     ctx.font = part.isEmoji
       ? `${fontSize}px "Apple Color Emoji"`
-      : `${fontWeight} ${fontSize}px sans-serif, "Apple Color Emoji", "Noto Color Emoji", "Segoe UI Emoji"`;
+      : `${fontWeight} ${fontSize}px Helvetica, AppleSDGothicNeo, "Apple Color Emoji"`;
     ctx.fillText(part.text, currentX, y);
     currentX += ctx.measureText(part.text).width;
   }

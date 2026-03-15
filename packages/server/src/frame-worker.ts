@@ -10,6 +10,8 @@ import {
 } from "../../core/src/index";
 
 GlobalFonts.registerFromPath("/System/Library/Fonts/Apple Color Emoji.ttc", "Apple Color Emoji");
+GlobalFonts.registerFromPath("/System/Library/Fonts/AppleSDGothicNeo.ttc", "AppleSDGothicNeo");
+GlobalFonts.registerFromPath("/System/Library/Fonts/Helvetica.ttc", "Helvetica");
 
 interface SavedSceneItem {
   id: string;
