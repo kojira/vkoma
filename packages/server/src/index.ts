@@ -486,11 +486,19 @@ app.get("/api/render/:projectId", async (c) => {
     console.log(`[GET render] frame capture (${totalFrames} frames): ${frameCaptureMs}ms, ffmpeg encode: ${ffmpegMs}ms, total: ${frameCaptureMs + ffmpegMs}ms`);
 
     const mp4Data = await readFile(outputPath);
+    const totalMs = frameCaptureMs + ffmpegMs;
+    const videoDuration = totalFrames / fps;
+    const rtf = videoDuration / (totalMs / 1000);
 
     return new Response(mp4Data, {
       headers: {
         "Content-Type": "video/mp4",
         "Content-Disposition": `attachment; filename="vkoma-export.mp4"`,
+        "X-Render-Frames": String(totalFrames),
+        "X-Render-Frame-Capture-Ms": String(frameCaptureMs),
+        "X-Render-Ffmpeg-Ms": String(ffmpegMs),
+        "X-Render-Total-Ms": String(totalMs),
+        "X-Render-RTF": String(rtf.toFixed(4)),
       },
     });
   } finally {

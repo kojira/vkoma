@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
@@ -69,6 +69,24 @@ test("AI generates scenes with unique marker, exports video via API", async ({ p
 
   const mp4Buffer = await renderRes.arrayBuffer();
   expect(mp4Buffer.byteLength).toBeGreaterThan(1000);
+
+  // RTF計測・記録
+  const renderMs = Number(renderRes.headers.get('X-Render-Total-Ms'));
+  const rtf = Number(renderRes.headers.get('X-Render-RTF'));
+  const rtfHistory = {
+    timestamp: new Date().toISOString(),
+    commit: execSync('git -C /Volumes/2TB/openclaw/workspace/projects/vkoma rev-parse --short HEAD').toString().trim(),
+    frames: Number(renderRes.headers.get('X-Render-Frames')),
+    frameCaptureMs: Number(renderRes.headers.get('X-Render-Frame-Capture-Ms')),
+    ffmpegMs: Number(renderRes.headers.get('X-Render-Ffmpeg-Ms')),
+    totalMs: renderMs,
+    rtf: rtf,
+  };
+  const historyPath = path.join(__dirname, '..', 'test-results', 'rtf-history.json');
+  const existing = existsSync(historyPath) ? JSON.parse(readFileSync(historyPath, 'utf-8')) : [];
+  writeFileSync(historyPath, JSON.stringify([...existing, rtfHistory], null, 2));
+  console.log(`RTF: ${rtf.toFixed(2)}x (${renderMs}ms for ${Number(renderRes.headers.get('X-Render-Frames'))} frames)`);
+  expect(rtf).toBeGreaterThan(2.0);
 
   // Post MP4 to Discord if token available
   const discordToken = process.env.DISCORD_BOT_TOKEN;

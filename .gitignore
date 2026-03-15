@@ -4,3 +4,5 @@ dist
 *.tsbuildinfo
 .DS_Store
 test-output.mp4
+packages/ui/test-results/
+test-output-bgm.mp4
