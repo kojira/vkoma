@@ -117,14 +117,8 @@ process.stdin.on("end", () => {
       const globalTime = frame / fps;
       const beatIntensity = getBeatIntensity(globalTime, beatTimings, 200);
       if (beatIntensity > 0.05) {
-        // 1. Beat Pulse (輝くグロー)
-        applyBeatEffect(ctx as any, width, height, beatIntensity, { type: 'kick', effect: 'pulse', intensity: 1.0 });
-        // 2. Hue Rotation (色相オーバーレイ)
-        applyBeatEffect(ctx as any, width, height, beatIntensity, { type: 'bass', effect: 'hue-rotation', intensity: 0.8 });
-        // 3. Particle Burst (放射線)
+        // Particle Burst (動きで表現、光の明滅なし)
         applyBeatEffect(ctx as any, width, height, beatIntensity, { type: 'kick', effect: 'particle-burst', intensity: 1.0 });
-        // 4. Vignette Pulse (周辺減光)
-        applyBeatEffect(ctx as any, width, height, beatIntensity, { type: 'kick', effect: 'vignette', intensity: 1.0 });
       }
     }
 

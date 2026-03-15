@@ -324,9 +324,197 @@ const FadeInScene = defineScene({
   },
 });
 
+// ---- Particle state for BeatParticlesScene ----
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+  size: number;
+  color: string;
+}
+
+const particleState: Particle[] = [];
+let lastBeatIntensity = 0;
+
+const EqualizerScene = defineScene({
+  id: "equalizer-scene",
+  name: "Equalizer Scene",
+  duration: 5,
+  defaultParams: {
+    barCount: sceneParams.number("Bar Count", 32, { min: 8, max: 64, step: 1 }),
+    color: sceneParams.color("Bar Color", "#00ff88"),
+    bgColor: sceneParams.color("Background", "#0a0a0a"),
+    style: sceneParams.select("Style", "bars", ["bars", "mirrored", "circular"]),
+  },
+  draw: (ctx, rawParams, time) => {
+    const p = rawParams as {
+      barCount: number;
+      color: string;
+      bgColor: string;
+      style: string;
+      beatIntensity?: number;
+    };
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+
+    ctx.fillStyle = p.bgColor;
+    ctx.fillRect(0, 0, w, h);
+
+    const beat = p.beatIntensity ?? 0;
+    const barCount = p.barCount;
+
+    if (p.style === "bars") {
+      const barWidth = (w / barCount) * 0.8;
+      const gap = (w / barCount) * 0.2;
+      for (let i = 0; i < barCount; i++) {
+        const seed = i * 0.618;
+        const baseHeight = (0.2 + 0.3 * Math.abs(Math.sin(seed + time * 2))) * h;
+        const beatBoost = beat * (0.5 + 0.5 * Math.abs(Math.sin(seed * 3))) * h * 0.4;
+        const barH = Math.min(baseHeight + beatBoost, h * 0.9);
+        const x = i * (barWidth + gap) + gap / 2;
+        const y = h - barH;
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = 0.8 + beat * 0.2;
+        ctx.fillRect(x, y, barWidth, barH);
+        ctx.globalAlpha = 1;
+      }
+    } else if (p.style === "mirrored") {
+      const barWidth = (w / barCount) * 0.8;
+      const gap = (w / barCount) * 0.2;
+      const centerY = h / 2;
+      for (let i = 0; i < barCount; i++) {
+        const seed = i * 0.618;
+        const baseHeight = (0.1 + 0.2 * Math.abs(Math.sin(seed + time * 2))) * h * 0.5;
+        const beatBoost = beat * (0.5 + 0.5 * Math.abs(Math.sin(seed * 3))) * h * 0.2;
+        const barH = Math.min(baseHeight + beatBoost, h * 0.45);
+        const x = i * (barWidth + gap) + gap / 2;
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = 0.8 + beat * 0.2;
+        ctx.fillRect(x, centerY - barH, barWidth, barH);
+        ctx.fillRect(x, centerY, barWidth, barH);
+        ctx.globalAlpha = 1;
+      }
+    } else {
+      // circular
+      const cx = w / 2;
+      const cy = h / 2;
+      const baseRadius = Math.min(w, h) * 0.2;
+      for (let i = 0; i < barCount; i++) {
+        const seed = i * 0.618;
+        const angle = (i / barCount) * Math.PI * 2;
+        const baseLen = (0.05 + 0.1 * Math.abs(Math.sin(seed + time * 2))) * Math.min(w, h);
+        const beatBoost = beat * (0.5 + 0.5 * Math.abs(Math.sin(seed * 3))) * Math.min(w, h) * 0.15;
+        const barLen = Math.min(baseLen + beatBoost, Math.min(w, h) * 0.3);
+        const x0 = cx + Math.cos(angle) * baseRadius;
+        const y0 = cy + Math.sin(angle) * baseRadius;
+        const x1 = cx + Math.cos(angle) * (baseRadius + barLen);
+        const y1 = cy + Math.sin(angle) * (baseRadius + barLen);
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = (w / barCount) * 0.5;
+        ctx.globalAlpha = 0.8 + beat * 0.2;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
+  },
+});
+
+const BeatParticlesScene = defineScene({
+  id: "beat-particles-scene",
+  name: "Beat Particles Scene",
+  duration: 5,
+  defaultParams: {
+    color: sceneParams.color("Particle Color", "#00ff88"),
+    bgColor: sceneParams.color("Background", "#0a0a0a"),
+    baseCount: sceneParams.number("Base Count", 30, { min: 5, max: 100, step: 1 }),
+  },
+  draw: (ctx, rawParams, time) => {
+    const p = rawParams as {
+      color: string;
+      bgColor: string;
+      baseCount: number;
+      beatIntensity?: number;
+    };
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    const beat = p.beatIntensity ?? 0;
+
+    // fade background
+    ctx.fillStyle = p.bgColor;
+    ctx.globalAlpha = 0.2;
+    ctx.fillRect(0, 0, w, h);
+    ctx.globalAlpha = 1;
+
+    // spawn particles on beat
+    if (beat > 0.3 && beat > lastBeatIntensity) {
+      const spawnCount = Math.floor(p.baseCount * beat);
+      for (let i = 0; i < spawnCount; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = (2 + Math.random() * 6) * (1 + beat * 3);
+        particleState.push({
+          x: w / 2 + (Math.random() - 0.5) * w * 0.3,
+          y: h / 2 + (Math.random() - 0.5) * h * 0.3,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1,
+          maxLife: 0.5 + Math.random() * 1,
+          size: 3 + Math.random() * 8 * beat,
+          color: p.color,
+        });
+      }
+    }
+    lastBeatIntensity = beat;
+
+    // update & draw particles
+    for (let i = particleState.length - 1; i >= 0; i--) {
+      const particle = particleState[i];
+      particle.x += particle.vx;
+      particle.y += particle.vy;
+      particle.vx *= 0.95;
+      particle.vy *= 0.95;
+      particle.life -= 0.016 / particle.maxLife;
+
+      if (particle.life <= 0) {
+        particleState.splice(i, 1);
+        continue;
+      }
+
+      ctx.globalAlpha = particle.life * 0.8;
+      ctx.fillStyle = particle.color;
+      ctx.beginPath();
+      ctx.arc(particle.x, particle.y, particle.size * particle.life, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Also draw base particles without beat
+    for (let i = 0; i < p.baseCount; i++) {
+      const seed = i * 137.508;
+      const angle = seed + time * 1.5;
+      const radius = ((seed * 0.3 + time * 30) % (Math.max(w, h) * 0.5));
+      const x = w / 2 + Math.cos(angle) * radius;
+      const y = h / 2 + Math.sin(angle) * radius;
+      const size = 2 + (i % 3) + beat * 4;
+      ctx.globalAlpha = 0.5 + beat * 0.3;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  },
+});
+
 export const allScenePresets: Scene[] = [
   TitleScene, SubtitleScene, ColorScene, BouncingTextScene, OutroScene,
   ParticlesScene, GradientScene, ZoomInScene, SlideInScene, FadeInScene,
+  EqualizerScene, BeatParticlesScene,
 ];
 
 export interface SceneItem {

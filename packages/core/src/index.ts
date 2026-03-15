@@ -191,7 +191,7 @@ export type { SceneItem } from "./scenes";
 
 export interface BeatSyncConfig {
   type: 'kick' | 'beat' | 'bass';
-  effect: 'pulse' | 'hue-rotation' | 'particle-burst' | 'vignette' | 'flash' | 'color-pulse';
+  effect: 'scale' | 'particle-burst';
   intensity: number;
 }
 
@@ -219,77 +219,34 @@ export function applyBeatEffect(
 ): void {
   if (beatIntensity <= 0) return;
   const maxIntensity = config.intensity * beatIntensity;
-  if (config.effect === 'flash') {
-    ctx.save();
-    ctx.globalAlpha = maxIntensity * 0.5;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, width, height);
-    ctx.restore();
-  } else if (config.effect === 'color-pulse') {
-    ctx.save();
-    ctx.globalCompositeOperation = 'screen';
-    ctx.globalAlpha = maxIntensity * 0.6;
-    ctx.fillStyle = '#ff4400';
-    ctx.fillRect(0, 0, width, height);
-    ctx.restore();
-  } else if (config.effect === 'pulse') {
-    // Beat Pulse - radial glow from center
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
+  if (config.effect === 'scale') {
+    // Subtle scale pulse via canvas transform (max 1.03)
+    const scale = 1 + Math.min(maxIntensity * 0.03, 0.03);
     const cx = width / 2;
     const cy = height / 2;
-    const maxRadius = Math.sqrt(cx * cx + cy * cy);
-    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxRadius);
-    gradient.addColorStop(0, `rgba(255, 255, 255, ${maxIntensity * 0.3})`);
-    gradient.addColorStop(0.5, `rgba(255, 255, 255, ${maxIntensity * 0.1})`);
-    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, width, height);
-    ctx.restore();
-  } else if (config.effect === 'hue-rotation') {
-    // Hue Rotation - color overlay that shifts with beat
     ctx.save();
-    ctx.globalCompositeOperation = 'overlay';
-    ctx.globalAlpha = maxIntensity * 0.4;
-    const hue = (beatIntensity * 360) % 360;
-    ctx.fillStyle = `hsl(${hue}, 100%, 50%)`;
-    ctx.fillRect(0, 0, width, height);
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+    ctx.translate(-cx, -cy);
     ctx.restore();
   } else if (config.effect === 'particle-burst') {
-    // Particle Burst - radial streaks from center
+    // Particle Burst - dynamic particles from center, no glow
     ctx.save();
-    ctx.globalCompositeOperation = 'screen';
-    ctx.globalAlpha = maxIntensity * 0.8;
+    ctx.globalAlpha = maxIntensity * 0.6;
     const pcx = width / 2;
     const pcy = height / 2;
-    const lineCount = 100;
-    const maxLen = 200 * beatIntensity;
-    for (let i = 0; i < lineCount; i++) {
-      const angle = (i / lineCount) * Math.PI * 2;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      const hueVal = (i / lineCount) * 360;
-      ctx.strokeStyle = `hsl(${hueVal}, 100%, 60%)`;
-      ctx.lineWidth = 2;
+    const particleCount = Math.floor(20 * beatIntensity);
+    for (let i = 0; i < particleCount; i++) {
+      const angle = (i / particleCount) * Math.PI * 2;
+      const dist = 30 + Math.random() * 150 * beatIntensity;
+      const x = pcx + Math.cos(angle) * dist;
+      const y = pcy + Math.sin(angle) * dist;
+      const size = 2 + Math.random() * 6 * beatIntensity;
+      ctx.fillStyle = '#00ff88';
       ctx.beginPath();
-      ctx.moveTo(pcx + cos * 20, pcy + sin * 20);
-      ctx.lineTo(pcx + cos * (20 + maxLen), pcy + sin * (20 + maxLen));
-      ctx.stroke();
+      ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.fill();
     }
-    ctx.restore();
-  } else if (config.effect === 'vignette') {
-    // Vignette Pulse - pulsating dark edges
-    ctx.save();
-    ctx.globalCompositeOperation = 'multiply';
-    const vcx = width / 2;
-    const vcy = height / 2;
-    const innerRadius = (width / 2) * (1 - maxIntensity * 0.3);
-    const outerRadius = Math.sqrt(width * width + height * height) / 2;
-    const vGradient = ctx.createRadialGradient(vcx, vcy, innerRadius, vcx, vcy, outerRadius);
-    vGradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-    vGradient.addColorStop(1, `rgba(0, 0, 0, ${0.8 * maxIntensity})`);
-    ctx.fillStyle = vGradient;
-    ctx.fillRect(0, 0, width, height);
     ctx.restore();
   }
 }
