@@ -317,7 +317,7 @@ const FadeInScene = defineScene({
   },
 });
 
-const allScenePresets = [TitleScene, SubtitleScene, ColorScene, BouncingTextScene, OutroScene, ParticlesScene, GradientScene, ZoomInScene, SlideInScene, FadeInScene];
+export const allScenePresets = [TitleScene, SubtitleScene, ColorScene, BouncingTextScene, OutroScene, ParticlesScene, GradientScene, ZoomInScene, SlideInScene, FadeInScene];
 
 function clampDuration(duration: number): number {
   return Math.max(0.5, Number.isFinite(duration) ? duration : 0.5);

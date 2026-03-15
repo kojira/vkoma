@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
-import { useSceneStore } from "../stores/sceneStore";
+import { useSceneStore, allScenePresets } from "../stores/sceneStore";
+import { defineScene, params as sceneParams, type SceneParam } from "../../../../packages/core/src/index";
 
 interface Message {
   id: string;
@@ -75,7 +76,7 @@ export function ChatPanel() {
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           const jsonStr = line.slice(6);
-          let event: { chunk?: string; scenes?: Array<{ id?: string; name?: string; duration?: number; params?: Record<string, unknown>; code?: string }>; error?: string; done?: boolean };
+          let event: { chunk?: string; scenes?: Array<{ id?: string; name?: string; duration?: number; params?: Record<string, unknown>; code?: string; renderCode?: string }>; error?: string; done?: boolean };
           try {
             event = JSON.parse(jsonStr);
           } catch {
@@ -103,6 +104,44 @@ export function ChatPanel() {
             const scenes = event.scenes ?? [];
             const addScene = useSceneStore.getState().addScene;
 
+            function resolveSceneConfig(scene: { code?: string; renderCode?: string; name?: string; duration?: number; params?: Record<string, unknown> }) {
+              if (scene.code) {
+                const preset = allScenePresets.find((p) => p.id === scene.code);
+                if (preset) return preset;
+              }
+              if (scene.renderCode) {
+                try {
+                  const drawFn = new Function("ctx", "params", "time", scene.renderCode) as (
+                    ctx: CanvasRenderingContext2D,
+                    params: Record<string, unknown>,
+                    time: number,
+                  ) => void;
+                  const defaultParams: Record<string, SceneParam> = {};
+                  if (scene.params) {
+                    for (const [key, value] of Object.entries(scene.params)) {
+                      if (typeof value === "number") {
+                        defaultParams[key] = sceneParams.number(key, value);
+                      } else if (typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)) {
+                        defaultParams[key] = sceneParams.color(key, value);
+                      } else if (typeof value === "string") {
+                        defaultParams[key] = sceneParams.string(key, value);
+                      }
+                    }
+                  }
+                  return defineScene({
+                    id: `dynamic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    name: scene.name ?? "Dynamic Scene",
+                    duration: scene.duration ?? 3,
+                    defaultParams,
+                    draw: drawFn,
+                  });
+                } catch {
+                  // fall through to undefined
+                }
+              }
+              return undefined;
+            }
+
             // Clear existing scenes first, then add generated ones
             const store = useSceneStore.getState();
             if (scenes.length > 0) {
@@ -111,18 +150,22 @@ export function ChatPanel() {
               }
               const first = scenes[0];
               if (first) {
+                const firstConfig = resolveSceneConfig(first);
                 useSceneStore.getState().updateScene(store.scenes[0].id, {
                   name: first.name ?? "Scene",
                   duration: first.duration ?? 3,
                   params: first.params ?? {},
+                  ...(firstConfig ? { sceneConfig: firstConfig } : {}),
                 });
               }
               for (const scene of scenes.slice(1)) {
+                const sceneConfig = resolveSceneConfig(scene);
                 addScene({
                   id: scene.id ?? `scene-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                   name: scene.name ?? "Scene",
                   duration: scene.duration ?? 3,
                   params: scene.params ?? {},
+                  ...(sceneConfig ? { sceneConfig } : {}),
                 });
               }
             }

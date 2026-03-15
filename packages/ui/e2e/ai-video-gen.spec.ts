@@ -64,7 +64,7 @@ test("AI generates scenes with unique marker, exports video via API", async ({ p
   const projectId = await getLatestProjectId();
 
   // Call render API directly with fps=1 for speed
-  const renderRes = await fetch(`${API_BASE}/api/render/${projectId}?fps=1`);
+  const renderRes = await fetch(`${API_BASE}/api/render/${projectId}?fps=30`);
   expect(renderRes.status).toBe(200);
 
   const mp4Buffer = await renderRes.arrayBuffer();
@@ -134,7 +134,7 @@ test("Export video with BGM audio track via API", async ({ page }) => {
   const bgmBlob = new Blob([bgmBytes], { type: "audio/wav" });
   const formData = new FormData();
   formData.append("projectId", projectId);
-  formData.append("fps", "1");
+  formData.append("fps", "30");
   formData.append("bgm", bgmBlob, "test-bgm.wav");
 
   const renderRes = await fetch(`${API_BASE}/api/render`, {
