@@ -174,12 +174,15 @@ export function renderScene(
 ): void {
   const sceneConfig = "sceneConfig" in scene ? scene.sceneConfig : scene;
   const instanceParams = "sceneConfig" in scene ? scene.params ?? {} : {};
-  const resolvedParams = Object.fromEntries(
-    Object.entries(sceneConfig.defaultParams).map(([key, param]) => [
-      key,
-      instanceParams[key] ?? param.default,
-    ]),
-  );
+  const resolvedParams = {
+    ...Object.fromEntries(
+      Object.entries(sceneConfig.defaultParams).map(([key, param]) => [
+        key,
+        instanceParams[key] ?? param.default,
+      ]),
+    ),
+    ...instanceParams, // dynamically injected params (fftBands, beatIntensity, etc.)
+  };
 
   ctx.clearRect(0, 0, width, height);
   sceneConfig.setup?.(ctx, resolvedParams);

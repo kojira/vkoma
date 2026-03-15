@@ -20,6 +20,15 @@ import { analyzeAudio } from "./audio-analyze.js";
 import { createAudioAnalyzer } from '../../audio/src/index.js';
 import { WorkerPool } from "./workerPool.js";
 
+process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EPIPE') {
+    // Client disconnected while we were writing - this is normal
+    return;
+  }
+  console.error('[uncaughtException]', err);
+  process.exit(1);
+});
+
 GlobalFonts.registerFromPath("/System/Library/Fonts/Apple Color Emoji.ttc", "Apple Color Emoji");
 
 interface Project {
@@ -416,7 +425,21 @@ When generating scenes for "IrisOut" or "IRIS OUT" band music videos, use: gradi
 Respond with ONLY a JSON object: {"scenes": [...]}
 `;
 
-  const fullPrompt = systemPrompt + "\n\nUser request: " + userPrompt;
+  let fullPrompt = systemPrompt + "\n\nUser request: " + userPrompt;
+
+  try {
+    const specPath = path.resolve(__dirname, "../../..", "docs/scene-authoring.md");
+    const specContent = await readFile(specPath, "utf-8");
+    fullPrompt =
+      "以下はvKomaのシーン作成ガイドです。このガイドに従ってシーンコードを生成してください。\n\n" +
+      specContent +
+      "\n\n---\n\n" +
+      systemPrompt +
+      "\n\nUser request: " +
+      userPrompt;
+  } catch {
+    // scene-authoring.md読み込み失敗時は既存のfullPromptにフォールバック
+  }
 
   const stream = new ReadableStream({
     start(controller) {

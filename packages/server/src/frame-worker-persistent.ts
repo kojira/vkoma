@@ -1,19 +1,23 @@
-import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
+import { createCanvas, GlobalFonts, loadImage } from "@napi-rs/canvas";
 import {
   type SceneParam,
   defineScene,
   params as sceneParams,
-  renderScene,
   allScenePresets,
   getSceneAtFrame,
   getBeatIntensity,
   applyBeatEffect,
   type SceneItem,
 } from "../../core/src/index";
+import { renderFrameWithBg } from "./render-frame";
+
+const imageCache = new Map<string, any>();
 
 GlobalFonts.registerFromPath("/System/Library/Fonts/Apple Color Emoji.ttc", "Apple Color Emoji");
 GlobalFonts.registerFromPath("/System/Library/Fonts/AppleSDGothicNeo.ttc", "AppleSDGothicNeo");
 GlobalFonts.registerFromPath("/System/Library/Fonts/Helvetica.ttc", "Helvetica");
+GlobalFonts.registerFromPath("/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc", "HiraginoSans");
+GlobalFonts.registerFromPath("/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc", "HiraginoSansLight");
 
 interface SavedSceneItem {
   id: string;
@@ -156,6 +160,14 @@ async function processRequest(jsonBytes: Buffer): Promise<void> {
   };
 
   const scenes = deserializeServerScenes(rawScenes);
+
+  for (const scene of scenes) {
+    const bgPath = scene.params?.bgImagePath;
+    if (typeof bgPath === 'string' && bgPath && !imageCache.has(bgPath)) {
+      try { imageCache.set(bgPath, await loadImage(bgPath)); } catch {}
+    }
+  }
+
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext("2d");
 
@@ -168,7 +180,7 @@ async function processRequest(jsonBytes: Buffer): Promise<void> {
     const localFrame = frame - hit.startFrame;
     const localTime = localFrame / fps;
 
-    if (precomputedFftData && hit.scene.sceneConfig.id === "equalizer-scene") {
+    if (precomputedFftData) {
       const frameIndex = frame - startFrame;
       const fftData = precomputedFftData[frameIndex];
       if (fftData) {
@@ -180,8 +192,25 @@ async function processRequest(jsonBytes: Buffer): Promise<void> {
       }
     }
 
-    ctx.clearRect(0, 0, width, height);
-    renderScene(hit.scene, ctx as any, width, height, localTime);
+    if (beatTimings && beatTimings.length > 0) {
+      const currentTimeSec = frame / fps;
+      const nearestBeat = beatTimings.reduce((prev, curr) =>
+        Math.abs(curr - currentTimeSec) < Math.abs(prev - currentTimeSec) ? curr : prev
+      );
+      const beatDist = Math.abs(nearestBeat - currentTimeSec);
+      const beatIntensity = Math.max(0, 1 - beatDist * 8);
+      if (!hit.scene.params) hit.scene.params = {};
+      hit.scene.params.beatIntensity = beatIntensity;
+    }
+
+    renderFrameWithBg({
+      scene: hit.scene,
+      ctx: ctx as any,
+      width,
+      height,
+      localTime,
+      imageCache,
+    });
 
     if (beatTimings && beatTimings.length > 0) {
       const globalTime = frame / fps;
