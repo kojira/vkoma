@@ -10,14 +10,18 @@ declare global {
 
 const CANVAS_WIDTH = 1920;
 const CANVAS_HEIGHT = 1080;
+const imageCache = new Map<string, HTMLImageElement>();
 
 export function PreviewCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
   const frameAccumulatorRef = useRef(0);
   const lastTimestampRef = useRef<number | null>(null);
 
   const scenes = useSceneStore((state) => state.scenes);
+  const bgmFile = useSceneStore((state) => state.bgmFile);
   const currentSceneIndex = useSceneStore((state) => state.currentSceneIndex);
   const currentFrame = useSceneStore((state) => state.currentFrame);
   const isPlaying = useSceneStore((state) => state.isPlaying);
@@ -51,8 +55,72 @@ export function PreviewCanvas() {
 
     const localFrame = Math.max(0, currentFrame - (activeRange?.startFrame ?? 0));
     const localTime = localFrame / fps;
+    const bgImagePath =
+      typeof range.scene.params?.bgImagePath === "string" ? range.scene.params.bgImagePath : "";
+
+    ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     renderScene(range.scene, ctx, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
+
+    if (bgImagePath) {
+      let image = imageCache.get(bgImagePath);
+      if (!image) {
+        image = new Image();
+        image.src = bgImagePath;
+        imageCache.set(bgImagePath, image);
+      }
+
+      if (image.complete) {
+        ctx.globalCompositeOperation = "destination-over";
+        ctx.drawImage(image, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.globalCompositeOperation = "source-over";
+      }
+    }
   }, [currentFrame, currentSceneIndex, fps, scenes, setCurrentScene]);
+
+  useEffect(() => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio();
+    }
+
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    audio.pause();
+
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+
+    if (!bgmFile) {
+      audio.removeAttribute("src");
+      audio.load();
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(bgmFile);
+    audioUrlRef.current = objectUrl;
+    audio.src = objectUrl;
+    audio.load();
+  }, [bgmFile]);
+
+  useEffect(() => {
+    return () => {
+      const audio = audioRef.current;
+      if (audio) {
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+      }
+
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     window.__vkoma_seekToFrame = (frameIndex: number, _fps: number) => {
@@ -63,6 +131,25 @@ export function PreviewCanvas() {
       delete window.__vkoma_seekToFrame;
     };
   }, []);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !bgmFile) {
+      return;
+    }
+
+    const targetTime = currentFrame / fps;
+    if (Math.abs(audio.currentTime - targetTime) >= 0.5) {
+      audio.currentTime = targetTime;
+    }
+
+    if (isPlaying) {
+      void audio.play().catch(() => {});
+      return;
+    }
+
+    audio.pause();
+  }, [bgmFile, currentFrame, fps, isPlaying]);
 
   useEffect(() => {
     if (!isPlaying) {
