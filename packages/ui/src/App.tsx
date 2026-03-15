@@ -10,17 +10,27 @@ import { useSceneStore } from "./stores/sceneStore";
 export default function App() {
   const currentProjectId = useSceneStore((state) => state.currentProjectId);
   const loadProject = useSceneStore((state) => state.loadProject);
+  const clearProject = useSceneStore((state) => state.clearProject);
   const autoLoadAttempted = useRef(false);
 
   useEffect(() => {
     if (autoLoadAttempted.current) return;
+
     const params = new URLSearchParams(window.location.search);
-    const pid = params.get("projectId");
-    if (pid && !currentProjectId) {
-      autoLoadAttempted.current = true;
-      loadProject(pid).catch(() => {});
+    const urlProjectId = params.get("projectId");
+    const persistedProjectId = useSceneStore.getState().currentProjectId;
+    const projectIdToLoad = urlProjectId ?? persistedProjectId;
+
+    autoLoadAttempted.current = true;
+
+    if (!projectIdToLoad) {
+      return;
     }
-  }, [currentProjectId, loadProject]);
+
+    loadProject(projectIdToLoad).catch(() => {
+      clearProject();
+    });
+  }, [clearProject, loadProject]);
 
   if (currentProjectId === null) {
     return <ProjectSelector />;
