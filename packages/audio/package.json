@@ -1,0 +1,16 @@
+{
+  "name": "@vkoma/audio",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "fft-js": "^0.0.12"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

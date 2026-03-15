@@ -33,7 +33,8 @@ export class WorkerPool {
       if (idleIdx !== -1) {
         this.idle.splice(idleIdx, 1);
       }
-      if (wasBusy || idleIdx !== -1) {
+      // Only warn for unexpected crashes (non-zero exit or signal), not normal exits during drain
+      if (!this.drained && (code !== 0 || signal !== null) && (wasBusy || idleIdx !== -1)) {
         console.warn(`[WorkerPool] worker pid=${child.pid} exited unexpectedly (code=${code}, signal=${signal})`);
       }
     });
@@ -92,9 +93,12 @@ export class WorkerPool {
     }
 
     const worker = await this.acquire(signal);
+    const t0 = Date.now();
 
     try {
-      return await this._runOnWorker(worker, input, signal);
+      const result = await this._runOnWorker(worker, input, signal);
+      this.lastTaskMs = Date.now() - t0;
+      return result;
     } catch (err) {
       if (signal?.aborted) {
         throw new Error("Render cancelled");

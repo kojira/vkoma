@@ -82,6 +82,8 @@ const TitleScene = defineScene({
     }),
     color: sceneParams.color("Text Color", "#ffffff"),
     bgColor: sceneParams.color("Background", "#111827"),
+    bgAlpha: sceneParams.number("BG Alpha", 0.82, { min: 0, max: 1, step: 0.01 }),
+    bgImagePath: sceneParams.string("BG Image Path", ""),
   },
   draw: (ctx, rawParams, time) => {
     const params = rawParams as {
@@ -113,6 +115,8 @@ const SubtitleScene = defineScene({
     fontSize: sceneParams.number("Font Size", 48, { min: 16, max: 96, step: 1 }),
     color: sceneParams.color("Text Color", "#60a5fa"),
     bgColor: sceneParams.color("Background", "#111827"),
+    bgAlpha: sceneParams.number("BG Alpha", 0.82, { min: 0, max: 1, step: 0.01 }),
+    bgImagePath: sceneParams.string("BG Image Path", ""),
   },
   draw: (ctx, rawParams, time) => {
     const p = rawParams as { text: string; fontSize: number; color: string; bgColor: string };
@@ -132,6 +136,8 @@ const ColorScene = defineScene({
   duration: 3,
   defaultParams: {
     speed: sceneParams.number("Speed", 1, { min: 0.1, max: 5, step: 0.1 }),
+    bgAlpha: sceneParams.number("BG Alpha", 0.82, { min: 0, max: 1, step: 0.01 }),
+    bgImagePath: sceneParams.string("BG Image Path", ""),
   },
   draw: (ctx, rawParams, time) => {
     const p = rawParams as { speed: number };
@@ -156,6 +162,8 @@ const BouncingTextScene = defineScene({
     fontSize: sceneParams.number("Font Size", 56, { min: 20, max: 100, step: 1 }),
     color: sceneParams.color("Text Color", "#fbbf24"),
     bgColor: sceneParams.color("Background", "#1e1b4b"),
+    bgAlpha: sceneParams.number("BG Alpha", 0.82, { min: 0, max: 1, step: 0.01 }),
+    bgImagePath: sceneParams.string("BG Image Path", ""),
   },
   draw: (ctx, rawParams, time) => {
     const p = rawParams as { text: string; fontSize: number; color: string; bgColor: string };
@@ -179,6 +187,8 @@ const OutroScene = defineScene({
     fontSize: sceneParams.number("Font Size", 72, { min: 24, max: 120, step: 1 }),
     color: sceneParams.color("Text Color", "#ffffff"),
     bgColor: sceneParams.color("Background", "#111827"),
+    bgAlpha: sceneParams.number("BG Alpha", 0.82, { min: 0, max: 1, step: 0.01 }),
+    bgImagePath: sceneParams.string("BG Image Path", ""),
   },
   draw: (ctx, rawParams, time) => {
     const p = rawParams as { text: string; fontSize: number; color: string; bgColor: string };
@@ -202,6 +212,8 @@ const ParticlesScene = defineScene({
     speed: sceneParams.number("Speed", 2, { min: 0.1, max: 10, step: 0.1 }),
     color: sceneParams.color("Particle Color", "#60a5fa"),
     bgColor: sceneParams.color("Background", "#0f172a"),
+    bgAlpha: sceneParams.number("BG Alpha", 0.82, { min: 0, max: 1, step: 0.01 }),
+    bgImagePath: sceneParams.string("BG Image Path", ""),
   },
   draw: (ctx, rawParams, time) => {
     const p = rawParams as { count: number; speed: number; color: string; bgColor: string };
@@ -232,6 +244,8 @@ const GradientScene = defineScene({
     color1: sceneParams.color("Color 1", "#6366f1"),
     color2: sceneParams.color("Color 2", "#ec4899"),
     speed: sceneParams.number("Rotation Speed", 1, { min: 0.1, max: 5, step: 0.1 }),
+    bgAlpha: sceneParams.number("BG Alpha", 0.82, { min: 0, max: 1, step: 0.01 }),
+    bgImagePath: sceneParams.string("BG Image Path", ""),
   },
   draw: (ctx, rawParams, time) => {
     const p = rawParams as { color1: string; color2: string; speed: number };
@@ -262,6 +276,8 @@ const ZoomInScene = defineScene({
     fontSize: sceneParams.number("Font Size", 64, { min: 16, max: 120, step: 1 }),
     color: sceneParams.color("Text Color", "#ffffff"),
     bgColor: sceneParams.color("Background", "#111827"),
+    bgAlpha: sceneParams.number("BG Alpha", 0.82, { min: 0, max: 1, step: 0.01 }),
+    bgImagePath: sceneParams.string("BG Image Path", ""),
   },
   draw: (ctx, rawParams, time) => {
     const p = rawParams as { text: string; fontSize: number; color: string; bgColor: string };
@@ -288,6 +304,8 @@ const SlideInScene = defineScene({
     fontSize: sceneParams.number("Font Size", 64, { min: 16, max: 120, step: 1 }),
     color: sceneParams.color("Text Color", "#fbbf24"),
     bgColor: sceneParams.color("Background", "#1e1b4b"),
+    bgAlpha: sceneParams.number("BG Alpha", 0.82, { min: 0, max: 1, step: 0.01 }),
+    bgImagePath: sceneParams.string("BG Image Path", ""),
   },
   draw: (ctx, rawParams, time) => {
     const p = rawParams as { text: string; fontSize: number; color: string; bgColor: string };
@@ -310,6 +328,8 @@ const FadeInScene = defineScene({
     fontSize: sceneParams.number("Font Size", 64, { min: 16, max: 120, step: 1 }),
     color: sceneParams.color("Text Color", "#34d399"),
     bgColor: sceneParams.color("Background", "#111827"),
+    bgAlpha: sceneParams.number("BG Alpha", 0.82, { min: 0, max: 1, step: 0.01 }),
+    bgImagePath: sceneParams.string("BG Image Path", ""),
   },
   draw: (ctx, rawParams, time) => {
     const p = rawParams as { text: string; fontSize: number; color: string; bgColor: string };
@@ -349,6 +369,8 @@ const EqualizerScene = defineScene({
     bgColor: sceneParams.color("Background", "#0a0a0a"),
     style: sceneParams.select("Style", "bars", ["bars", "mirrored", "circular"]),
     fftBands: sceneParams.string("FFT Bands JSON", ""),
+    bgAlpha: sceneParams.number("BG Alpha", 0.82, { min: 0, max: 1, step: 0.01 }),
+    bgImagePath: sceneParams.string("BG Image Path", ""),
   },
   draw: (ctx, rawParams, time) => {
     const p = rawParams as {
@@ -450,6 +472,8 @@ const BeatParticlesScene = defineScene({
     color: sceneParams.color("Particle Color", "#00ff88"),
     bgColor: sceneParams.color("Background", "#0a0a0a"),
     baseCount: sceneParams.number("Base Count", 30, { min: 5, max: 100, step: 1 }),
+    bgAlpha: sceneParams.number("BG Alpha", 0.82, { min: 0, max: 1, step: 0.01 }),
+    bgImagePath: sceneParams.string("BG Image Path", ""),
   },
   draw: (ctx, rawParams, time) => {
     const p = rawParams as {
