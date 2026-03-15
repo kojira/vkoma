@@ -90,47 +90,55 @@ function deserializeServerScenes(rawScenes: unknown): SceneItem[] {
     .filter((scene): scene is SceneItem => scene !== null);
 }
 
-// Read exactly `n` bytes from stdin. Returns null on EOF/error.
+// ---- stdin buffering (flowing mode to keep event loop alive) ----
+const _stdinChunks: Buffer[] = [];
+let _stdinTotalLen = 0;
+const _stdinWaiters: Array<{ n: number; resolve: (buf: Buffer | null) => void }> = [];
+let _stdinEnded = false;
+
+process.stdin.on("data", (chunk: Buffer) => {
+  _stdinChunks.push(chunk);
+  _stdinTotalLen += chunk.length;
+  _drainWaiters();
+});
+
+process.stdin.on("end", () => {
+  _stdinEnded = true;
+  for (const w of _stdinWaiters) w.resolve(null);
+  _stdinWaiters.length = 0;
+});
+
+function _drainWaiters(): void {
+  while (_stdinWaiters.length > 0 && _stdinTotalLen >= _stdinWaiters[0].n) {
+    const waiter = _stdinWaiters.shift()!;
+    const combined = Buffer.concat(_stdinChunks);
+    _stdinChunks.length = 0;
+    _stdinTotalLen = 0;
+    if (combined.length > waiter.n) {
+      _stdinChunks.push(combined.slice(waiter.n));
+      _stdinTotalLen = combined.length - waiter.n;
+    }
+    waiter.resolve(combined.slice(0, waiter.n));
+  }
+}
+
 function readExact(n: number): Promise<Buffer | null> {
+  if (_stdinEnded) return Promise.resolve(null);
+  const combined = Buffer.concat(_stdinChunks);
+  if (combined.length >= n) {
+    _stdinChunks.length = 0;
+    _stdinTotalLen = 0;
+    if (combined.length > n) {
+      _stdinChunks.push(combined.slice(n));
+      _stdinTotalLen = combined.length - n;
+    }
+    return Promise.resolve(combined.slice(0, n));
+  }
   return new Promise((resolve) => {
-    const stdin = process.stdin;
-    let buf = Buffer.alloc(0);
-
-    const tryRead = () => {
-      while (buf.length < n) {
-        const chunk = stdin.read(n - buf.length) as Buffer | null;
-        if (chunk === null) {
-          // Not enough data yet, wait for more
-          stdin.once("readable", tryRead);
-          return;
-        }
-        buf = Buffer.concat([buf, chunk]);
-      }
-      cleanup();
-      resolve(buf);
-    };
-
-    const onEnd = () => {
-      cleanup();
-      resolve(null);
-    };
-
-    const onError = () => {
-      cleanup();
-      resolve(null);
-    };
-
-    const cleanup = () => {
-      stdin.removeListener("end", onEnd);
-      stdin.removeListener("error", onError);
-    };
-
-    stdin.on("end", onEnd);
-    stdin.on("error", onError);
-
-    tryRead();
+    _stdinWaiters.push({ n, resolve });
   });
 }
+// ---- end stdin buffering ----
 
 async function processRequest(jsonBytes: Buffer): Promise<void> {
   const { rawScenes, fps, startFrame, endFrame, width, height, beatTimings, precomputedFftData, everyNthFrame } = JSON.parse(
@@ -200,9 +208,6 @@ async function processRequest(jsonBytes: Buffer): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  process.stdin.pause();
-  process.stdin.ref(); // Keep event loop alive (required for Node.js 25.5.0+)
-
   while (true) {
     // Read 4-byte length prefix
     const lenBuf = await readExact(4);
