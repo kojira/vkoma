@@ -9,7 +9,12 @@ export default defineConfig({
     browserName: "chromium",
     viewport: { width: 1280, height: 720 },
     launchOptions: {
-      args: ["--autoplay-policy=no-user-gesture-required", "--use-fake-ui-for-media-stream"],
+      args: [
+        "--autoplay-policy=no-user-gesture-required",
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream",
+        "--enable-features=MediaRecorder",
+      ],
     },
   },
   webServer: {

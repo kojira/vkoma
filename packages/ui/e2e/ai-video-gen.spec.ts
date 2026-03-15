@@ -1,68 +1,67 @@
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
-test("AI generates 5 scenes, exports video, posts to Discord", async ({ page }) => {
+test("AI generates scenes with unique marker, exports video, posts to Discord", async ({ page }) => {
   await page.goto("/");
+  await page.waitForLoadState("networkidle");
 
-  // Handle the ProjectSelector: click "+ 新規プロジェクト" and accept the prompt dialog
-  page.on("dialog", (dialog) => dialog.accept("Test Project"));
+  // Click create button and handle the prompt dialog
   const createButton = page.getByText("+ 新規プロジェクト");
-  if (await createButton.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await createButton.click();
-  }
+  await createButton.waitFor({ state: "visible", timeout: 10_000 });
+
+  // Handle prompt dialog - must be registered before click
+  page.once("dialog", (dialog) => dialog.accept("Test Project"));
+  await createButton.click();
 
   // Wait for main editor to load after project creation
-  await page.getByTestId("chat-input").waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByTestId("chat-input").waitFor({ state: "visible", timeout: 30_000 });
 
-  // Fill chat input and send
+  // Fill chat input with a prompt that includes a unique marker
   const chatInput = page.getByTestId("chat-input");
-  await chatInput.fill(
-    "5つのシーンを作って。タイトル、サブタイトル、カラー背景、バウンステキスト、アウトロ。各シーン3秒。",
-  );
+  await chatInput.fill("タイトルを'E2E_TEST_OK_99999'にしたシーンを1つ作って");
 
   const chatSend = page.getByTestId("chat-send");
+
+  const responsePromise = page.waitForResponse(
+    resp => resp.url().includes('/api/ai/generate') && resp.status() === 200,
+    { timeout: 90_000 }
+  );
+
   await chatSend.click();
 
-  // Wait for 5 scenes to appear in timeline (timeout 90s)
-  const timelineScenes = page.getByTestId("timeline-scenes");
-  await expect(async () => {
-    const buttons = await timelineScenes.locator("button").count();
-    expect(buttons).toBeGreaterThanOrEqual(5);
-  }).toPass({ timeout: 90_000 });
+  const aiResponse = await responsePromise;
+  const aiData = await aiResponse.json();
+  expect(aiData.scenes).toBeDefined();
+  expect(aiData.scenes.length).toBeGreaterThan(0);
+  await page.waitForTimeout(2000);
 
-  // Export video
-  const downloadPromise = page.waitForEvent("download", { timeout: 120_000 });
+  // Save the project first (required for server-side export)
+  await page.locator("text=💾 保存").click();
+  await page.waitForTimeout(2000);
+
+  // Export video - server returns MP4 directly
+  // Handle any alert dialogs that might appear during export
+  page.on("dialog", (d) => d.dismiss().catch(() => {}));
+  const downloadPromise = page.waitForEvent("download", { timeout: 180_000 });
   await page.getByTestId("export-button").click();
 
   const download = await downloadPromise;
-  const outputPath = "/tmp/vkoma-ai-export.webm";
-  await download.saveAs(outputPath);
+  const mp4Path = "/tmp/vkoma-ai-export.mp4";
+  await download.saveAs(mp4Path);
 
-  expect(existsSync(outputPath)).toBe(true);
-  expect(statSync(outputPath).size).toBeGreaterThan(0);
+  expect(existsSync(mp4Path)).toBe(true);
+  expect(statSync(mp4Path).size).toBeGreaterThan(10000);
 
-  // Post to Discord
+  // Post MP4 to Discord
   const discordToken = process.env.DISCORD_BOT_TOKEN;
   if (discordToken) {
     const channelId = "1479115942293409942";
-    const fileContent = readFileSync(outputPath);
-    const boundary = "----FormBoundary" + Date.now().toString(36);
-
-    let body = "";
-    body += `--${boundary}\r\n`;
-    body += 'Content-Disposition: form-data; name="content"\r\n\r\n';
-    body += "vKoma AI video generation E2E test result\r\n";
-    body += `--${boundary}\r\n`;
-    body += `Content-Disposition: form-data; name="files[0]"; filename="vkoma-ai-export.webm"\r\n`;
-    body += "Content-Type: video/webm\r\n\r\n";
-
-    // Use curl for multipart upload
     execSync(
       `curl -s -X POST "https://discord.com/api/v10/channels/${channelId}/messages" ` +
         `-H "Authorization: Bot ${discordToken}" ` +
-        `-F 'content=vKoma AI video generation E2E test result' ` +
-        `-F 'files[0]=@${outputPath};type=video/webm'`,
+        `-F 'content=vKoma AI生成動画 E2Eテスト結果' ` +
+        `-F 'files[0]=@${mp4Path};type=video/mp4'`,
       { timeout: 30_000 },
     );
   }

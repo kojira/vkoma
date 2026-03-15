@@ -2,6 +2,12 @@ import { useEffect, useRef } from "react";
 import { renderScene } from "@vkoma/core";
 import { getSceneAtFrame, useSceneStore } from "../stores/sceneStore";
 
+declare global {
+  interface Window {
+    __vkoma_seekToFrame?: (frameIndex: number, fps: number) => void;
+  }
+}
+
 const CANVAS_WIDTH = 1920;
 const CANVAS_HEIGHT = 1080;
 
@@ -47,6 +53,16 @@ export function PreviewCanvas() {
     const localTime = localFrame / fps;
     renderScene(range.scene, ctx, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
   }, [currentFrame, currentSceneIndex, fps, scenes, setCurrentScene]);
+
+  useEffect(() => {
+    window.__vkoma_seekToFrame = (frameIndex: number, _fps: number) => {
+      useSceneStore.getState().setPlaying(false);
+      useSceneStore.getState().setCurrentFrame(frameIndex);
+    };
+    return () => {
+      delete window.__vkoma_seekToFrame;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isPlaying) {

@@ -1,9 +1,10 @@
 import { serve } from "@hono/node-server";
-import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { spawn, execSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Hono } from "hono";
+import { chromium } from "playwright-core";
 
 interface Project {
   id: string;
@@ -123,18 +124,24 @@ Respond with ONLY a JSON object: {"scenes": [...]}
 
   try {
     const result = await new Promise<string>((resolve, reject) => {
-      execFile(
-        "claude",
-        ["-p", fullPrompt, "--output-format", "json"],
-        { timeout: 60_000 },
-        (error, stdout, stderr) => {
-          if (error) {
-            reject(new Error(stderr || error.message));
-          } else {
-            resolve(stdout);
-          }
-        },
-      );
+      const claudePath = process.env.CLAUDE_PATH || "/Users/kojira/.local/bin/claude";
+      const child = spawn(claudePath, ["-p", fullPrompt, "--output-format", "json"], {
+        timeout: 60_000,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
+      child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+      child.on("close", (code) => {
+        if (code !== 0) {
+          reject(new Error(stderr || `claude exited with code ${code}`));
+        } else {
+          resolve(stdout);
+        }
+      });
+      child.on("error", (err) => reject(err));
+      child.stdin.end();
     });
 
     // Claude with --output-format json wraps result in a JSON object with a "result" field
@@ -158,6 +165,71 @@ Respond with ONLY a JSON object: {"scenes": [...]}
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return c.json({ error: message }, 500);
+  }
+});
+
+app.post("/api/render", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const projectId = typeof body.projectId === "string" ? body.projectId : "";
+  const fps = typeof body.fps === "number" ? body.fps : 30;
+
+  if (!projectId) {
+    return c.json({ error: "projectId is required" }, 400);
+  }
+
+  let project: Project;
+  try {
+    project = await readProject(projectId);
+  } catch {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const scenes = project.scenes as Array<{ duration?: number }>;
+  const totalFrames = scenes.reduce((sum, scene) => {
+    const duration = typeof scene.duration === "number" ? scene.duration : 1;
+    return sum + Math.max(1, Math.round(duration * fps));
+  }, 0);
+
+  if (totalFrames <= 0) {
+    return c.json({ error: "No frames to render" }, 400);
+  }
+
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "vkoma-render-"));
+
+  try {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+
+    await page.goto(`http://localhost:5174/?projectId=${projectId}`, { waitUntil: "networkidle" });
+
+    // Wait for __vkoma_seekToFrame to be defined
+    await page.waitForFunction(() => typeof (window as any).__vkoma_seekToFrame === "function", null, { timeout: 30_000 });
+
+    for (let frame = 0; frame < totalFrames; frame++) {
+      await page.evaluate(([f, r]) => (window as any).__vkoma_seekToFrame(f, r), [frame, fps] as const);
+      await page.waitForTimeout(100);
+      const canvas = page.locator("canvas");
+      await canvas.screenshot({ path: path.join(tmpDir, `frame_${String(frame).padStart(6, "0")}.png`) });
+    }
+
+    await browser.close();
+
+    const outputPath = path.join(tmpDir, "output.mp4");
+    execSync(
+      `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -pix_fmt yuv420p "${outputPath}"`,
+      { timeout: 120_000 },
+    );
+
+    const mp4Data = await readFile(outputPath);
+
+    return new Response(mp4Data, {
+      headers: {
+        "Content-Type": "video/mp4",
+        "Content-Disposition": `attachment; filename="vkoma-export.mp4"`,
+      },
+    });
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
 });
 
