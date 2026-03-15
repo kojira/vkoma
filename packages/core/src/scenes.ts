@@ -348,6 +348,7 @@ const EqualizerScene = defineScene({
     color: sceneParams.color("Bar Color", "#00ff88"),
     bgColor: sceneParams.color("Background", "#0a0a0a"),
     style: sceneParams.select("Style", "bars", ["bars", "mirrored", "circular"]),
+    fftBands: sceneParams.string("FFT Bands JSON", ""),
   },
   draw: (ctx, rawParams, time) => {
     const p = rawParams as {
@@ -356,6 +357,7 @@ const EqualizerScene = defineScene({
       bgColor: string;
       style: string;
       beatIntensity?: number;
+      fftBands?: string;
     };
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;
@@ -366,12 +368,21 @@ const EqualizerScene = defineScene({
     const beat = p.beatIntensity ?? 0;
     const barCount = p.barCount;
 
+    const fftBandsRaw = p.fftBands;
+    let fftData: number[] | null = null;
+    if (fftBandsRaw && typeof fftBandsRaw === "string" && fftBandsRaw.length > 0) {
+      try { fftData = JSON.parse(fftBandsRaw); } catch {}
+    }
+
     if (p.style === "bars") {
       const barWidth = (w / barCount) * 0.8;
       const gap = (w / barCount) * 0.2;
       for (let i = 0; i < barCount; i++) {
         const seed = i * 0.618;
-        const baseHeight = (0.2 + 0.3 * Math.abs(Math.sin(seed + time * 2))) * h;
+        const fftVal = fftData && i < fftData.length ? fftData[i] : null;
+        const baseHeight = fftVal !== null
+          ? fftVal * h * 0.9
+          : (0.2 + 0.3 * Math.abs(Math.sin(seed + time * 2))) * h;
         const beatBoost = beat * (0.5 + 0.5 * Math.abs(Math.sin(seed * 3))) * h * 0.4;
         const barH = Math.min(baseHeight + beatBoost, h * 0.9);
         const x = i * (barWidth + gap) + gap / 2;
@@ -387,7 +398,10 @@ const EqualizerScene = defineScene({
       const centerY = h / 2;
       for (let i = 0; i < barCount; i++) {
         const seed = i * 0.618;
-        const baseHeight = (0.1 + 0.2 * Math.abs(Math.sin(seed + time * 2))) * h * 0.5;
+        const fftVal = fftData && i < fftData.length ? fftData[i] : null;
+        const baseHeight = fftVal !== null
+          ? fftVal * h * 0.45
+          : (0.1 + 0.2 * Math.abs(Math.sin(seed + time * 2))) * h * 0.5;
         const beatBoost = beat * (0.5 + 0.5 * Math.abs(Math.sin(seed * 3))) * h * 0.2;
         const barH = Math.min(baseHeight + beatBoost, h * 0.45);
         const x = i * (barWidth + gap) + gap / 2;
@@ -405,7 +419,10 @@ const EqualizerScene = defineScene({
       for (let i = 0; i < barCount; i++) {
         const seed = i * 0.618;
         const angle = (i / barCount) * Math.PI * 2;
-        const baseLen = (0.05 + 0.1 * Math.abs(Math.sin(seed + time * 2))) * Math.min(w, h);
+        const fftVal = fftData && i < fftData.length ? fftData[i] : null;
+        const baseLen = fftVal !== null
+          ? fftVal * Math.min(w, h) * 0.3
+          : (0.05 + 0.1 * Math.abs(Math.sin(seed + time * 2))) * Math.min(w, h);
         const beatBoost = beat * (0.5 + 0.5 * Math.abs(Math.sin(seed * 3))) * Math.min(w, h) * 0.15;
         const barLen = Math.min(baseLen + beatBoost, Math.min(w, h) * 0.3);
         const x0 = cx + Math.cos(angle) * baseRadius;

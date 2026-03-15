@@ -18,6 +18,7 @@ import {
 } from "../../core/src/index";
 import { analyzeAudio } from "./audio-analyze.js";
 import { createAudioAnalyzer } from '../../audio/src/index.js';
+import { WorkerPool } from "./workerPool.js";
 
 GlobalFonts.registerFromPath("/System/Library/Fonts/Apple Color Emoji.ttc", "Apple Color Emoji");
 
@@ -133,12 +134,17 @@ function deserializeServerScenes(rawScenes: unknown): SceneItem[] {
 
 const __filename_esm = fileURLToPath(import.meta.url);
 const __dirname_esm = path.dirname(__filename_esm);
-const FRAME_WORKER_PATH = path.join(__dirname_esm, "frame-worker.ts");
 
 function getWorkerCount(): number {
-  const cpus = os.cpus().length;
-  return Math.max(1, Math.min(8, cpus - 1));
+  // remotion-style: round to nearest, clamp to [1, 8]
+  const cpuCount = os.cpus().length;
+  return Math.round(Math.min(8, Math.max(1, cpuCount / 2)));
 }
+
+const workerPool = new WorkerPool(getWorkerCount());
+process.on("exit", () => {
+  workerPool.drain().catch(() => {});
+});
 
 interface FftFrameData {
   bands: number[];
@@ -156,41 +162,20 @@ function renderFramesInWorker(
   height: number,
   beatTimings?: number[],
   precomputedFftData?: FftFrameData[],
+  signal?: AbortSignal,
+  everyNthFrame?: number,
 ): Promise<Buffer[]> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("node", ["--import", "tsx/esm", FRAME_WORKER_PATH], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    const chunks: Buffer[] = [];
-    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-
-    let stderrData = "";
-    child.stderr.on("data", (chunk: Buffer) => { stderrData += chunk.toString(); });
-
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error(`Worker exited with code ${code}: ${stderrData.slice(-500)}`));
-        return;
-      }
-      // Parse length-prefixed JPEG buffers from stdout
-      const raw = Buffer.concat(chunks);
-      const buffers: Buffer[] = [];
-      let offset = 0;
-      while (offset + 4 <= raw.length) {
-        const len = raw.readUInt32BE(offset);
-        offset += 4;
-        if (offset + len > raw.length) break;
-        buffers.push(raw.subarray(offset, offset + len));
-        offset += len;
-      }
-      resolve(buffers);
-    });
-    child.on("error", reject);
-
-    child.stdin.write(JSON.stringify({ rawScenes, fps, startFrame, endFrame, width, height, beatTimings, precomputedFftData }));
-    child.stdin.end();
-  });
+  return workerPool.run({
+    rawScenes,
+    fps,
+    startFrame,
+    endFrame,
+    width,
+    height,
+    beatTimings,
+    precomputedFftData,
+    everyNthFrame,
+  }, signal);
 }
 
 async function renderVideo(
@@ -201,6 +186,12 @@ async function renderVideo(
   outputPath: string,
   bgmPath?: string,
   beatTimings?: number[],
+  options?: {
+    signal?: AbortSignal;
+    onFrameUpdate?: (renderedFrames: number, totalFrames: number) => void;
+    onProgress?: (rendered: number, total: number) => void;
+    everyNthFrame?: number;
+  },
 ): Promise<{ frameCaptureMs: number; ffmpegMs: number }> {
   const WIDTH = 1920;
   const HEIGHT = 1080;
@@ -261,34 +252,66 @@ async function renderVideo(
     }
   }
 
-  // Parallel frame rendering with worker_threads
+  // Dynamic chunk scheduling: small chunks for better load balancing (remotion-style)
   const workerCount = Math.min(getWorkerCount(), totalFrames);
-  const framesPerWorker = Math.ceil(totalFrames / workerCount);
-  const workerPromises: Promise<Buffer[]>[] = [];
-
-  for (let i = 0; i < workerCount; i++) {
-    const start = i * framesPerWorker;
-    const end = Math.min(start + framesPerWorker, totalFrames);
-    if (start >= totalFrames) break;
-    workerPromises.push(
-      renderFramesInWorker(rawScenes, fps, start, end, WIDTH, HEIGHT, beatTimings, fftFrameData?.slice(start, end)),
-    );
+  const chunkSize = Math.max(4, Math.ceil(totalFrames / (workerCount * 4)));
+  const chunks: Array<{ start: number; end: number; index: number }> = [];
+  for (let frame = 0, idx = 0; frame < totalFrames; frame += chunkSize, idx++) {
+    chunks.push({ start: frame, end: Math.min(frame + chunkSize, totalFrames), index: idx });
   }
 
-  // Pipeline: await each worker in order and pipe frames to ffmpeg immediately
-  for (const workerPromise of workerPromises) {
-    const buffers = await workerPromise;
-    for (const buf of buffers) {
-      try {
-        const ok = ffmpeg.stdin.write(buf);
-        if (!ok) {
-          await new Promise<void>((resolve) => ffmpeg.stdin.once("drain", resolve));
+  // Launch all chunks — WorkerPool limits concurrency via its pool size
+  const completedChunks = new Map<number, Buffer[]>();
+  let renderedFrames = 0;
+  let nextChunkToWrite = 0;
+  let writeResolve: (() => void) | null = null;
+
+  const chunkPromises = chunks.map((chunk) =>
+    renderFramesInWorker(
+      rawScenes, fps, chunk.start, chunk.end, WIDTH, HEIGHT,
+      beatTimings, fftFrameData?.slice(chunk.start, chunk.end),
+      options?.signal, options?.everyNthFrame,
+    ).then((buffers) => {
+      completedChunks.set(chunk.index, buffers);
+      renderedFrames += buffers.length;
+      options?.onFrameUpdate?.(renderedFrames, totalFrames);
+      options?.onProgress?.(renderedFrames, totalFrames);
+      // Notify the ordered writer that a new chunk is available
+      if (writeResolve) {
+        const fn = writeResolve;
+        writeResolve = null;
+        fn();
+      }
+    }),
+  );
+
+  // Ordered frame writer: write chunks to ffmpeg in correct sequence
+  const writeOrdered = async () => {
+    while (nextChunkToWrite < chunks.length) {
+      if (!completedChunks.has(nextChunkToWrite)) {
+        await new Promise<void>((resolve) => {
+          writeResolve = resolve;
+        });
+        continue;
+      }
+      const buffers = completedChunks.get(nextChunkToWrite)!;
+      completedChunks.delete(nextChunkToWrite);
+      nextChunkToWrite++;
+      for (const buf of buffers) {
+        try {
+          const ok = ffmpeg.stdin.write(buf);
+          if (!ok) {
+            await new Promise<void>((resolve) => ffmpeg.stdin.once("drain", resolve));
+          }
+        } catch {
+          return;
         }
-      } catch {
-        break;
       }
     }
-  }
+  };
+
+  // Run rendering and ordered writing concurrently
+  await Promise.all([Promise.all(chunkPromises), writeOrdered()]);
   const t1 = Date.now();
 
   ffmpeg.stdin.end();
@@ -532,6 +555,97 @@ app.get("/api/render/:projectId", async (c) => {
   } finally {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
+});
+
+app.get("/api/render/:projectId/stream", async (c) => {
+  const projectId = c.req.param("projectId");
+  const fps = Number(c.req.query("fps") || "30") || 30;
+
+  let project: Project;
+  try {
+    project = await readProject(projectId);
+  } catch {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const scenes = deserializeServerScenes(project.scenes);
+  if (scenes.length === 0) {
+    return c.json({ error: "No scenes to render" }, 400);
+  }
+
+  const ranges = getSceneFrameRanges(scenes, fps);
+  const totalFrames = ranges[ranges.length - 1]?.endFrame ?? 0;
+  if (totalFrames <= 0) {
+    return c.json({ error: "No frames to render" }, 400);
+  }
+
+  const abortController = new AbortController();
+
+  const stream = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      let closed = false;
+
+      const send = (obj: Record<string, unknown>) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        } catch {
+          closed = true;
+        }
+      };
+
+      const closeController = () => {
+        if (closed) return;
+        closed = true;
+        try { controller.close(); } catch { /* already closed */ }
+      };
+
+      const tmpDir = path.join(os.tmpdir(), `vkoma-render-stream-${Date.now()}`);
+      mkdir(tmpDir, { recursive: true }).then(async () => {
+        try {
+          const outputPath = path.join(tmpDir, "output.mp4");
+          const { frameCaptureMs, ffmpegMs } = await renderVideo(
+            scenes,
+            project.scenes,
+            fps,
+            totalFrames,
+            outputPath,
+            undefined,
+            undefined,
+            {
+              signal: abortController.signal,
+              onFrameUpdate: (rendered, total) => {
+                const percent = Math.round((rendered / total) * 100);
+                send({ type: "progress", rendered, total, percent });
+              },
+            },
+          );
+
+          console.log(`[SSE render] frame capture (${totalFrames} frames): ${frameCaptureMs}ms, ffmpeg encode: ${ffmpegMs}ms`);
+          send({ type: "done", url: `/api/render/${projectId}` });
+        } catch (err) {
+          if (abortController.signal.aborted) return;
+          const message = err instanceof Error ? err.message : "Unknown error";
+          send({ type: "error", message });
+        } finally {
+          closeController();
+          rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+        }
+      });
+    },
+    cancel() {
+      abortController.abort();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 });
 
 app.post("/api/render", async (c) => {
