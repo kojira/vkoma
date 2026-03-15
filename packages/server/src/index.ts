@@ -157,7 +157,8 @@ async function renderVideo(
     "-threads", "0",
   );
   if (bgmPath) {
-    ffmpegArgs.push("-c:a", "aac", "-shortest");
+    const videoDuration = totalFrames / fps;
+    ffmpegArgs.push("-c:a", "aac", "-t", String(videoDuration));
   }
   ffmpegArgs.push(outputPath);
 
