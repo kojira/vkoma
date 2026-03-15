@@ -71,7 +71,7 @@ app.get("/api/mv-assets/:filename", async (c) => {
       ".webp": "image/webp",
     };
     const contentType = mimeTypes[ext] ?? "application/octet-stream";
-    return new Response(data, {
+    return new Response(new Uint8Array(data), {
       headers: { "Content-Type": contentType },
     });
   } catch {
@@ -403,6 +403,64 @@ app.get("/api/projects/:id", async (c) => {
   }
 });
 
+app.post("/api/projects/:id/bgm", async (c) => {
+  const id = c.req.param("id");
+  const projectDir = getProjectDir(id);
+  await mkdir(projectDir, { recursive: true });
+
+  const body = await c.req.parseBody();
+  const bgmFile = body["bgm"];
+  if (!bgmFile || typeof bgmFile === "string") {
+    return c.json({ error: "No bgm file" }, 400);
+  }
+
+  const ext = path.extname(bgmFile.name || "bgm.wav").toLowerCase() || ".wav";
+  const bgmPath = path.join(projectDir, `bgm${ext}`);
+
+  try {
+    const files = await readdir(projectDir);
+    for (const f of files) {
+      if (/^bgm\.(wav|mp3|ogg|aac|flac)$/.test(f) && f !== `bgm${ext}`) {
+        await rm(path.join(projectDir, f)).catch(() => {});
+      }
+    }
+  } catch {}
+
+  const arrayBuffer = await bgmFile.arrayBuffer();
+  await writeFile(bgmPath, Buffer.from(arrayBuffer));
+  return c.json({ bgmPath: `/api/projects/${id}/bgm` });
+});
+
+app.get("/api/projects/:id/bgm", async (c) => {
+  const id = c.req.param("id");
+  const projectDir = getProjectDir(id);
+
+  try {
+    const files = await readdir(projectDir);
+    const bgmFile = files.find((f) => /^bgm\.(wav|mp3|ogg|aac|flac)$/.test(f));
+    if (!bgmFile) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const bgmPath = path.join(projectDir, bgmFile);
+    const data = await readFile(bgmPath);
+    const ext = path.extname(bgmFile).toLowerCase();
+    const mimeMap: Record<string, string> = {
+      ".wav": "audio/wav",
+      ".mp3": "audio/mpeg",
+      ".ogg": "audio/ogg",
+      ".aac": "audio/aac",
+      ".flac": "audio/flac",
+    };
+    const contentType = mimeMap[ext] ?? "audio/wav";
+    return new Response(data, {
+      headers: { "Content-Type": contentType },
+    });
+  } catch {
+    return c.json({ error: "Not found" }, 404);
+  }
+});
+
 app.put("/api/projects/:id", async (c) => {
   let project: Project;
 
@@ -619,7 +677,7 @@ app.get("/api/projects/:id/download", async (c) => {
   } catch {
     return c.json({ error: "No rendered video found. Please export first." }, 404);
   }
-  return new Response(mp4Data, {
+  return new Response(new Uint8Array(mp4Data), {
     headers: {
       "Content-Type": "video/mp4",
       "Content-Disposition": `attachment; filename="vkoma-export.mp4"`,

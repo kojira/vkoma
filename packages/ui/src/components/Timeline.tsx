@@ -447,9 +447,26 @@ export function Timeline() {
               type="file"
               accept="audio/*"
               data-testid="bgm-input"
-              onChange={(event) => {
+              onChange={async (event) => {
                 const file = event.target.files?.[0] ?? null;
-                useSceneStore.getState().setBgmFile(file);
+                if (file) {
+                  const projectId = useSceneStore.getState().currentProjectId;
+                  if (projectId) {
+                    const formData = new FormData();
+                    formData.append("bgm", file);
+                    try {
+                      await fetch(`/api/projects/${projectId}/bgm`, {
+                        method: "POST",
+                        body: formData,
+                      });
+                    } catch (e) {
+                      console.error("BGM upload failed", e);
+                    }
+                  }
+                  useSceneStore.getState().setBgmFile(file);
+                } else {
+                  useSceneStore.getState().setBgmFile(null);
+                }
               }}
               className="text-sm text-gray-400 file:mr-2 file:rounded-md file:border-0 file:bg-gray-800 file:px-3 file:py-1 file:text-sm file:text-white file:cursor-pointer"
             />

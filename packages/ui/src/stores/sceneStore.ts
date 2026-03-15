@@ -216,6 +216,18 @@ export const useSceneStore = create<SceneStore>()(
           currentFrame: 0,
           isPlaying: false,
         }));
+        try {
+          const bgmResponse = await fetch(`/api/projects/${id}/bgm`);
+          if (bgmResponse.ok) {
+            const blob = await bgmResponse.blob();
+            const contentType = bgmResponse.headers.get("content-type") ?? "audio/wav";
+            const ext = contentType.includes("mpeg") ? "mp3" : "wav";
+            const bgmFileObj = new File([blob], `bgm.${ext}`, { type: contentType });
+            set(() => ({ bgmFile: bgmFileObj }));
+          }
+        } catch {
+          // BGMなしは正常
+        }
       },
       saveProject: async () => {
         const { currentProjectId, projectName, scenes } = get();
