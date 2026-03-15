@@ -201,6 +201,7 @@ async function processRequest(jsonBytes: Buffer): Promise<void> {
 
 async function main(): Promise<void> {
   process.stdin.pause();
+  process.stdin.ref(); // Keep event loop alive (required for Node.js 25.5.0+)
 
   while (true) {
     // Read 4-byte length prefix
