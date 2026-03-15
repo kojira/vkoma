@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import {
@@ -128,8 +129,62 @@ function deserializeServerScenes(rawScenes: unknown): SceneItem[] {
     .filter((scene): scene is SceneItem => scene !== null);
 }
 
+const __filename_esm = fileURLToPath(import.meta.url);
+const __dirname_esm = path.dirname(__filename_esm);
+const FRAME_WORKER_PATH = path.join(__dirname_esm, "frame-worker.ts");
+
+function getWorkerCount(): number {
+  const cpus = os.cpus().length;
+  return Math.max(1, Math.min(8, cpus - 1));
+}
+
+function renderFramesInWorker(
+  rawScenes: unknown[],
+  fps: number,
+  startFrame: number,
+  endFrame: number,
+  width: number,
+  height: number,
+): Promise<Buffer[]> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("node", ["--import", "tsx/esm", FRAME_WORKER_PATH], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const chunks: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+
+    let stderrData = "";
+    child.stderr.on("data", (chunk: Buffer) => { stderrData += chunk.toString(); });
+
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`Worker exited with code ${code}: ${stderrData.slice(-500)}`));
+        return;
+      }
+      // Parse length-prefixed JPEG buffers from stdout
+      const raw = Buffer.concat(chunks);
+      const buffers: Buffer[] = [];
+      let offset = 0;
+      while (offset + 4 <= raw.length) {
+        const len = raw.readUInt32BE(offset);
+        offset += 4;
+        if (offset + len > raw.length) break;
+        buffers.push(raw.subarray(offset, offset + len));
+        offset += len;
+      }
+      resolve(buffers);
+    });
+    child.on("error", reject);
+
+    child.stdin.write(JSON.stringify({ rawScenes, fps, startFrame, endFrame, width, height }));
+    child.stdin.end();
+  });
+}
+
 async function renderVideo(
   scenes: SceneItem[],
+  rawScenes: unknown[],
   fps: number,
   totalFrames: number,
   outputPath: string,
@@ -137,25 +192,27 @@ async function renderVideo(
 ): Promise<{ frameCaptureMs: number; ffmpegMs: number }> {
   const WIDTH = 1920;
   const HEIGHT = 1080;
-  const canvas = createCanvas(WIDTH, HEIGHT);
-  const ctx = canvas.getContext("2d");
+
+  // Determine encoder: VideoToolbox on macOS, libx264 elsewhere
+  const useMacHW = process.platform === "darwin";
 
   const ffmpegArgs = [
     "-y",
-    "-f", "image2pipe",
-    "-vcodec", "png",
+    "-f", "mjpeg",
+    "-vcodec", "mjpeg",
     "-r", String(fps),
     "-i", "pipe:0",
   ];
   if (bgmPath) {
     ffmpegArgs.push("-i", bgmPath);
   }
-  ffmpegArgs.push(
-    "-vf", "format=yuv420p",
-    "-c:v", "libx264",
-    "-preset", "ultrafast",
-    "-threads", "0",
-  );
+  ffmpegArgs.push("-vf", "format=yuv420p");
+  if (useMacHW) {
+    ffmpegArgs.push("-c:v", "h264_videotoolbox", "-allow_sw", "1");
+  } else {
+    ffmpegArgs.push("-c:v", "libx264", "-preset", "ultrafast");
+  }
+  ffmpegArgs.push("-threads", "0");
   if (bgmPath) {
     const videoDuration = totalFrames / fps;
     ffmpegArgs.push("-c:a", "aac", "-t", String(videoDuration));
@@ -178,27 +235,36 @@ async function renderVideo(
 
   const t0 = Date.now();
 
-  for (let frame = 0; frame < totalFrames; frame++) {
-    const hit = getSceneAtFrame(scenes, fps, frame);
-    if (!hit) continue;
+  // Parallel frame rendering with worker_threads
+  const workerCount = Math.min(getWorkerCount(), totalFrames);
+  const framesPerWorker = Math.ceil(totalFrames / workerCount);
+  const workerPromises: Promise<Buffer[]>[] = [];
 
-    const localFrame = frame - hit.startFrame;
-    const localTime = localFrame / fps;
-
-    renderScene(hit.scene, ctx as any, WIDTH, HEIGHT, localTime);
-
-    const pngBuffer = canvas.toBuffer("image/png");
-    try {
-      const ok = ffmpeg.stdin.write(pngBuffer);
-      if (!ok) {
-        await new Promise<void>((resolve) => ffmpeg.stdin.once("drain", resolve));
-      }
-    } catch {
-      break; // ffmpeg died, stop writing
-    }
+  for (let i = 0; i < workerCount; i++) {
+    const start = i * framesPerWorker;
+    const end = Math.min(start + framesPerWorker, totalFrames);
+    if (start >= totalFrames) break;
+    workerPromises.push(
+      renderFramesInWorker(rawScenes, fps, start, end, WIDTH, HEIGHT),
+    );
   }
 
+  // Pipeline: await each worker in order and pipe frames to ffmpeg immediately
+  for (const workerPromise of workerPromises) {
+    const buffers = await workerPromise;
+    for (const buf of buffers) {
+      try {
+        const ok = ffmpeg.stdin.write(buf);
+        if (!ok) {
+          await new Promise<void>((resolve) => ffmpeg.stdin.once("drain", resolve));
+        }
+      } catch {
+        break;
+      }
+    }
+  }
   const t1 = Date.now();
+
   ffmpeg.stdin.end();
   await done;
   const t2 = Date.now();
@@ -415,7 +481,7 @@ app.get("/api/render/:projectId", async (c) => {
 
   try {
     const outputPath = path.join(tmpDir, "output.mp4");
-    const { frameCaptureMs, ffmpegMs } = await renderVideo(scenes, fps, totalFrames, outputPath);
+    const { frameCaptureMs, ffmpegMs } = await renderVideo(scenes, project.scenes, fps, totalFrames, outputPath);
 
     console.log(`[GET render] frame capture (${totalFrames} frames): ${frameCaptureMs}ms, ffmpeg encode: ${ffmpegMs}ms, total: ${frameCaptureMs + ffmpegMs}ms`);
 
@@ -492,7 +558,7 @@ app.post("/api/render", async (c) => {
       await writeFile(bgmPath, Buffer.from(bgmData));
     }
 
-    const { frameCaptureMs, ffmpegMs } = await renderVideo(scenes, fps, totalFrames, outputPath, bgmPath);
+    const { frameCaptureMs, ffmpegMs } = await renderVideo(scenes, project.scenes, fps, totalFrames, outputPath, bgmPath);
 
     console.log(`[POST render] frame capture (${totalFrames} frames): ${frameCaptureMs}ms, ffmpeg encode: ${ffmpegMs}ms, total: ${frameCaptureMs + ffmpegMs}ms`);
 

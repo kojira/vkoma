@@ -1,0 +1,117 @@
+import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
+import {
+  type SceneParam,
+  defineScene,
+  params as sceneParams,
+  renderScene,
+  allScenePresets,
+  getSceneAtFrame,
+  type SceneItem,
+} from "../../core/src/index";
+
+GlobalFonts.registerFromPath("/System/Library/Fonts/Apple Color Emoji.ttc", "Apple Color Emoji");
+
+interface SavedSceneItem {
+  id: string;
+  name: string;
+  duration: number;
+  params: Record<string, unknown>;
+  sceneConfigId: string;
+  renderCode?: string;
+  sceneConfig?: { id?: string };
+}
+
+function deserializeServerScenes(rawScenes: unknown): SceneItem[] {
+  if (!Array.isArray(rawScenes)) return [];
+
+  return rawScenes
+    .map<SceneItem | null>((scene, index) => {
+      if (!scene || typeof scene !== "object") return null;
+
+      const saved = scene as Partial<SavedSceneItem>;
+      const sceneConfigId = saved.sceneConfigId ?? saved.sceneConfig?.id;
+      let preset = allScenePresets.find((entry) => entry.id === sceneConfigId);
+
+      if (!preset && saved.renderCode && typeof saved.renderCode === "string") {
+        try {
+          const drawFn = new Function("ctx", "params", "time", saved.renderCode) as (
+            ctx: any,
+            params: Record<string, unknown>,
+            time: number,
+          ) => void;
+
+          const paramEntries =
+            saved.params && typeof saved.params === "object" ? Object.entries(saved.params) : [];
+          const defaultParams: Record<string, SceneParam> = {};
+          for (const [key, value] of paramEntries) {
+            if (typeof value === "number") {
+              defaultParams[key] = sceneParams.number(key, value);
+            } else if (typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)) {
+              defaultParams[key] = sceneParams.color(key, value);
+            } else if (typeof value === "string") {
+              defaultParams[key] = sceneParams.string(key, value);
+            }
+          }
+
+          preset = defineScene({
+            id: sceneConfigId || `dynamic-${Date.now()}-${index}`,
+            name: typeof saved.name === "string" ? saved.name : "Dynamic Scene",
+            duration: typeof saved.duration === "number" ? saved.duration : 3,
+            defaultParams,
+            draw: drawFn,
+          });
+        } catch {
+          return null;
+        }
+      }
+
+      if (!preset) return null;
+
+      return {
+        id:
+          typeof saved.id === "string" && saved.id.length > 0
+            ? saved.id
+            : `scene-${Date.now()}-${index}`,
+        name: typeof saved.name === "string" ? saved.name : preset.name,
+        duration: typeof saved.duration === "number" ? Math.max(0.5, saved.duration) : preset.duration,
+        sceneConfig: preset,
+        params: {
+          ...Object.fromEntries(
+            Object.entries(preset.defaultParams).map(([key, param]) => [key, param.default]),
+          ),
+          ...(saved.params && typeof saved.params === "object" ? saved.params : {}),
+        },
+      };
+    })
+    .filter((scene): scene is SceneItem => scene !== null);
+}
+
+// Read JSON input from stdin
+let inputData = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { inputData += chunk; });
+process.stdin.on("end", () => {
+  const { rawScenes, fps, startFrame, endFrame, width, height } = JSON.parse(inputData);
+
+  const scenes = deserializeServerScenes(rawScenes);
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext("2d");
+
+  // Write raw JPEG buffers directly to stdout, each prefixed with 4-byte length
+  for (let frame = startFrame; frame < endFrame; frame++) {
+    const hit = getSceneAtFrame(scenes, fps, frame);
+    if (!hit) continue;
+
+    const localFrame = frame - hit.startFrame;
+    const localTime = localFrame / fps;
+
+    ctx.clearRect(0, 0, width, height);
+    renderScene(hit.scene, ctx as any, width, height, localTime);
+
+    const jpegBuf = canvas.toBuffer("image/jpeg", 80);
+    const lenBuf = Buffer.alloc(4);
+    lenBuf.writeUInt32BE(jpegBuf.length, 0);
+    process.stdout.write(lenBuf);
+    process.stdout.write(jpegBuf);
+  }
+});
