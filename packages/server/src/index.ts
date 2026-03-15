@@ -1,10 +1,10 @@
 import { serve } from "@hono/node-server";
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Hono } from "hono";
-import { createCanvas } from "@napi-rs/canvas";
+import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import {
   type SceneParam,
   defineScene,
@@ -15,6 +15,8 @@ import {
   getSceneAtFrame,
   type SceneItem,
 } from "../../core/src/index";
+
+GlobalFonts.registerFromPath("/System/Library/Fonts/Apple Color Emoji.ttc", "Apple Color Emoji");
 
 interface Project {
   id: string;
@@ -126,18 +128,54 @@ function deserializeServerScenes(rawScenes: unknown): SceneItem[] {
     .filter((scene): scene is SceneItem => scene !== null);
 }
 
-async function renderFramesToDisk(
+async function renderVideo(
   scenes: SceneItem[],
   fps: number,
   totalFrames: number,
-  tmpDir: string,
-) {
+  outputPath: string,
+  bgmPath?: string,
+): Promise<{ frameCaptureMs: number; ffmpegMs: number }> {
   const WIDTH = 1920;
   const HEIGHT = 1080;
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext("2d");
 
-  const writePromises: Promise<void>[] = [];
+  const ffmpegArgs = [
+    "-y",
+    "-f", "image2pipe",
+    "-vcodec", "png",
+    "-r", String(fps),
+    "-i", "pipe:0",
+  ];
+  if (bgmPath) {
+    ffmpegArgs.push("-i", bgmPath);
+  }
+  ffmpegArgs.push(
+    "-vf", "format=yuv420p",
+    "-c:v", "libx264",
+    "-preset", "ultrafast",
+    "-threads", "0",
+  );
+  if (bgmPath) {
+    ffmpegArgs.push("-c:a", "aac", "-shortest");
+  }
+  ffmpegArgs.push(outputPath);
+
+  const ffmpeg = spawn("ffmpeg", ffmpegArgs, { stdio: ["pipe", "pipe", "pipe"] });
+
+  let stderrOutput = "";
+  ffmpeg.stderr.on("data", (chunk: Buffer) => { stderrOutput += chunk.toString(); });
+  ffmpeg.stdin.on("error", () => {}); // Suppress EPIPE
+
+  const done = new Promise<void>((resolve, reject) => {
+    ffmpeg.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg exited with code ${code}: ${stderrOutput.slice(-500)}`));
+    });
+    ffmpeg.on("error", reject);
+  });
+
+  const t0 = Date.now();
 
   for (let frame = 0; frame < totalFrames; frame++) {
     const hit = getSceneAtFrame(scenes, fps, frame);
@@ -149,11 +187,22 @@ async function renderFramesToDisk(
     renderScene(hit.scene, ctx as any, WIDTH, HEIGHT, localTime);
 
     const pngBuffer = canvas.toBuffer("image/png");
-    const framePath = path.join(tmpDir, `frame_${String(frame).padStart(6, "0")}.png`);
-    writePromises.push(writeFile(framePath, pngBuffer));
+    try {
+      const ok = ffmpeg.stdin.write(pngBuffer);
+      if (!ok) {
+        await new Promise<void>((resolve) => ffmpeg.stdin.once("drain", resolve));
+      }
+    } catch {
+      break; // ffmpeg died, stop writing
+    }
   }
 
-  await Promise.all(writePromises);
+  const t1 = Date.now();
+  ffmpeg.stdin.end();
+  await done;
+  const t2 = Date.now();
+
+  return { frameCaptureMs: t1 - t0, ffmpegMs: t2 - t1 };
 }
 
 app.get("/api/projects", async (c) => {
@@ -364,18 +413,10 @@ app.get("/api/render/:projectId", async (c) => {
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "vkoma-render-"));
 
   try {
-    const t0 = Date.now();
-    await renderFramesToDisk(scenes, fps, totalFrames, tmpDir);
-    const t1 = Date.now();
-
     const outputPath = path.join(tmpDir, "output.mp4");
-    execSync(
-      `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -preset ultrafast -threads 0 -pix_fmt yuv420p "${outputPath}"`,
-      { timeout: 120_000 },
-    );
-    const t2 = Date.now();
+    const { frameCaptureMs, ffmpegMs } = await renderVideo(scenes, fps, totalFrames, outputPath);
 
-    console.log(`[GET render] frame capture (${totalFrames} frames): ${t1 - t0}ms, ffmpeg encode: ${t2 - t1}ms, total: ${t2 - t0}ms`);
+    console.log(`[GET render] frame capture (${totalFrames} frames): ${frameCaptureMs}ms, ffmpeg encode: ${ffmpegMs}ms, total: ${frameCaptureMs + ffmpegMs}ms`);
 
     const mp4Data = await readFile(outputPath);
 
@@ -443,27 +484,16 @@ app.post("/api/render", async (c) => {
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "vkoma-render-"));
 
   try {
-    const t0 = Date.now();
-    await renderFramesToDisk(scenes, fps, totalFrames, tmpDir);
-    const t1 = Date.now();
-
     const outputPath = path.join(tmpDir, "output.mp4");
+    let bgmPath: string | undefined;
     if (bgmData) {
-      const bgmPath = path.join(tmpDir, bgmFilename);
+      bgmPath = path.join(tmpDir, bgmFilename);
       await writeFile(bgmPath, Buffer.from(bgmData));
-      execSync(
-        `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -i "${bgmPath}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -preset ultrafast -threads 0 -c:a aac -shortest -pix_fmt yuv420p "${outputPath}"`,
-        { timeout: 120_000 },
-      );
-    } else {
-      execSync(
-        `ffmpeg -framerate ${fps} -i "${path.join(tmpDir, "frame_%06d.png")}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -preset ultrafast -threads 0 -pix_fmt yuv420p "${outputPath}"`,
-        { timeout: 120_000 },
-      );
     }
-    const t2 = Date.now();
 
-    console.log(`[POST render] frame capture (${totalFrames} frames): ${t1 - t0}ms, ffmpeg encode: ${t2 - t1}ms, total: ${t2 - t0}ms`);
+    const { frameCaptureMs, ffmpegMs } = await renderVideo(scenes, fps, totalFrames, outputPath, bgmPath);
+
+    console.log(`[POST render] frame capture (${totalFrames} frames): ${frameCaptureMs}ms, ffmpeg encode: ${ffmpegMs}ms, total: ${frameCaptureMs + ffmpegMs}ms`);
 
     const mp4Data = await readFile(outputPath);
 
