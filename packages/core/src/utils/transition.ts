@@ -1,10 +1,21 @@
 export type TransitionType =
+  | "none"
   | "fade"
   | "crossfade"
   | "slide-left"
-  | "slide-right";
+  | "slide-right"
+  | "slide-up"
+  | "slide-down"
+  | "wipe-left"
+  | "wipe-right"
+  | "iris-open"
+  | "iris-close"
+  | "zoom-in"
+  | "zoom-out"
+  | "glitch";
 
 import type { EasingType } from "../params";
+import { applyEasing } from "../params";
 
 export interface TransitionConfig {
   type: TransitionType;
@@ -12,6 +23,162 @@ export interface TransitionConfig {
   easing: EasingType;
   color?: string;
   direction?: "ltr" | "rtl";
+}
+
+export function applyEasingValue(progress: number, easing: EasingType): number {
+  return applyEasing(progress, easing);
+}
+
+export function applyTransitionIn(
+  ctx: CanvasRenderingContext2D,
+  progress: number,
+  type: TransitionType,
+  config: TransitionConfig,
+  width: number,
+  height: number,
+  renderFn: () => void,
+): void {
+  const eased = applyEasingValue(progress, config.easing);
+
+  switch (type) {
+    case "none": {
+      renderFn();
+      break;
+    }
+
+    case "fade":
+    case "crossfade": {
+      ctx.save();
+      ctx.globalAlpha = eased;
+      renderFn();
+      ctx.restore();
+      break;
+    }
+
+    case "slide-left": {
+      ctx.save();
+      ctx.translate(-(1 - eased) * width, 0);
+      renderFn();
+      ctx.restore();
+      break;
+    }
+
+    case "slide-right": {
+      ctx.save();
+      ctx.translate((1 - eased) * width, 0);
+      renderFn();
+      ctx.restore();
+      break;
+    }
+
+    case "slide-up": {
+      ctx.save();
+      ctx.translate(0, -(1 - eased) * height);
+      renderFn();
+      ctx.restore();
+      break;
+    }
+
+    case "slide-down": {
+      ctx.save();
+      ctx.translate(0, (1 - eased) * height);
+      renderFn();
+      ctx.restore();
+      break;
+    }
+
+    case "wipe-left": {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, eased * width, height);
+      ctx.clip();
+      renderFn();
+      ctx.restore();
+      break;
+    }
+
+    case "wipe-right": {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect((1 - eased) * width, 0, eased * width, height);
+      ctx.clip();
+      renderFn();
+      ctx.restore();
+      break;
+    }
+
+    case "iris-open": {
+      const radius = eased * Math.sqrt(width * width + height * height) / 2;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(width / 2, height / 2, radius, 0, Math.PI * 2);
+      ctx.clip();
+      renderFn();
+      ctx.restore();
+      break;
+    }
+
+    case "iris-close": {
+      const radius = (1 - eased) * Math.sqrt(width * width + height * height) / 2;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(width / 2, height / 2, radius, 0, Math.PI * 2);
+      ctx.clip();
+      renderFn();
+      ctx.restore();
+      break;
+    }
+
+    case "zoom-in": {
+      const cx = width / 2, cy = height / 2;
+      const scale = 0.5 + eased * 0.5;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(scale, scale);
+      ctx.translate(-cx, -cy);
+      renderFn();
+      ctx.restore();
+      break;
+    }
+
+    case "zoom-out": {
+      const cx = width / 2, cy = height / 2;
+      const scale = 1.5 - eased * 0.5;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(scale, scale);
+      ctx.translate(-cx, -cy);
+      renderFn();
+      ctx.restore();
+      break;
+    }
+
+    case "glitch": {
+      const count = 3;
+      for (let i = 0; i < count; i++) {
+        const offsetX = (Math.random() * 2 - 1) * 20 * (1 - eased);
+        const offsetY = (Math.random() * 2 - 1) * 10 * (1 - eased);
+        ctx.save();
+        ctx.globalAlpha = i === 0 ? 1 : 0.5;
+        ctx.translate(offsetX, offsetY);
+        renderFn();
+        ctx.restore();
+      }
+      break;
+    }
+  }
+}
+
+export function applyTransitionOut(
+  ctx: CanvasRenderingContext2D,
+  progress: number,
+  type: TransitionType,
+  config: TransitionConfig,
+  width: number,
+  height: number,
+  renderFn: () => void,
+): void {
+  applyTransitionIn(ctx, 1 - progress, type, config, width, height, renderFn);
 }
 
 export function renderWithTransition(options: {
@@ -38,11 +205,9 @@ export function renderWithTransition(options: {
 
     case "fade": {
       if (progress < 0.5) {
-        // Fade out fromCanvas
         ctx.globalAlpha = 1 - progress * 2;
         ctx.drawImage(fromCanvas, 0, 0, width, height);
       } else {
-        // Fade in toCanvas
         ctx.globalAlpha = (progress - 0.5) * 2;
         ctx.drawImage(toCanvas, 0, 0, width, height);
       }
