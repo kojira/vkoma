@@ -83,13 +83,13 @@ function AssetCard({ asset, onRemove }: { asset: Asset; onRemove: (id: string) =
 function getAcceptForTab(tab: TabType): string {
   switch (tab) {
     case "image":
-      return "image/jpeg,image/png,image/gif,image/webp,image/svg+xml";
+      return "image/*,.jpg,.jpeg,.png,.gif,.webp,.svg";
     case "audio":
-      return "audio/mp3,audio/mpeg,audio/wav,audio/x-wav,audio/wave,audio/m4a,audio/x-m4a,audio/aac,audio/ogg";
+      return "audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.mp4";
     case "video":
-      return "video/mp4,video/webm,video/quicktime";
+      return "video/*,.mp4,.webm,.mov";
     default:
-      return "audio/mp3,audio/mpeg,audio/wav,audio/x-wav,audio/wave,audio/m4a,audio/x-m4a,audio/aac,audio/ogg,video/mp4,video/webm,video/quicktime,image/jpeg,image/png,image/gif,image/webp";
+      return "image/*,audio/*,video/*,.jpg,.jpeg,.png,.gif,.webp,.svg,.mp3,.wav,.m4a,.aac,.ogg,.flac,.mp4,.webm,.mov";
   }
 }
 

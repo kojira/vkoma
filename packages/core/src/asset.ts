@@ -39,7 +39,10 @@ const MIME_TYPE_MAP: Record<string, AssetType> = {
   // audio
   'audio/mpeg': 'audio',
   'audio/mp3': 'audio',
+  'audio/mp4': 'audio',
   'audio/wav': 'audio',
+  'audio/x-m4a': 'audio',
+  'audio/3gpp': 'audio',
   'audio/ogg': 'audio',
   'audio/aac': 'audio',
   'audio/flac': 'audio',
