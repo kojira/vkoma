@@ -21,8 +21,10 @@ import {
   type AssetLibrary,
   getAssetType,
 } from "../../core/src/index";
+import type { Track } from "../../core/src/timeline";
 import { analyzeAudio } from "./audio-analyze.js";
 import { createAudioAnalyzer } from '../../audio/src/index.js';
+import { renderFrameWithTracks } from "./render-frame.js";
 import { WorkerPool } from "./workerPool.js";
 
 process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
@@ -40,6 +42,10 @@ interface Project {
   id: string;
   name: string;
   scenes: unknown[];
+  timeline?: {
+    duration: number;
+    tracks: Track[];
+  };
   createdAt: string;
   updatedAt: string;
 }
@@ -242,6 +248,7 @@ async function renderVideo(
   outputPath: string,
   bgmPath?: string,
   beatTimings?: number[],
+  tracks?: Track[],
   options?: {
     signal?: AbortSignal;
     onFrameUpdate?: (renderedFrames: number, totalFrames: number) => void;
@@ -306,6 +313,43 @@ async function renderVideo(
     } catch (e) {
       console.warn("[renderVideo] FFT precompute failed:", e);
     }
+  }
+
+  if (tracks) {
+    for (let frame = 0; frame < totalFrames; frame++) {
+      if (options?.signal?.aborted) {
+        throw new Error("Render aborted");
+      }
+
+      const buffer = await renderFrameWithTracks(
+        tracks,
+        frame / fps,
+        WIDTH,
+        HEIGHT,
+        fftFrameData?.[frame]?.bands ?? [],
+        path.dirname(outputPath),
+      );
+
+      try {
+        const ok = ffmpeg.stdin.write(buffer);
+        if (!ok) {
+          await new Promise<void>((resolve) => ffmpeg.stdin.once("drain", resolve));
+        }
+      } catch {
+        break;
+      }
+
+      const renderedFrames = frame + 1;
+      options?.onFrameUpdate?.(renderedFrames, totalFrames);
+      options?.onProgress?.(renderedFrames, totalFrames);
+    }
+
+    const t1 = Date.now();
+    ffmpeg.stdin.end();
+    await done;
+    const t2 = Date.now();
+
+    return { frameCaptureMs: t1 - t0, ffmpegMs: t2 - t1 };
   }
 
   // Dynamic chunk scheduling: small chunks for better load balancing (remotion-style)
@@ -673,13 +717,15 @@ app.get("/api/render/:projectId", async (c) => {
     return c.json({ error: "Project not found" }, 404);
   }
 
+  const tracks = Array.isArray(project.timeline?.tracks) ? project.timeline.tracks : undefined;
   const scenes = deserializeServerScenes(project.scenes);
-  if (scenes.length === 0) {
+  if (!tracks && scenes.length === 0) {
     return c.json({ error: "No scenes to render" }, 400);
   }
 
-  const ranges = getSceneFrameRanges(scenes, fps);
-  const totalFrames = ranges[ranges.length - 1]?.endFrame ?? 0;
+  const totalFrames = tracks
+    ? Math.ceil(((project.timeline?.duration ?? 0) * fps))
+    : (getSceneFrameRanges(scenes, fps).at(-1)?.endFrame ?? 0);
   if (totalFrames <= 0) {
     return c.json({ error: "No frames to render" }, 400);
   }
@@ -688,7 +734,17 @@ app.get("/api/render/:projectId", async (c) => {
 
   try {
     const outputPath = path.join(tmpDir, "output.mp4");
-    const { frameCaptureMs, ffmpegMs } = await renderVideo(scenes, project.scenes, fps, totalFrames, outputPath);
+    const tracks = Array.isArray(project.timeline?.tracks) ? project.timeline.tracks : undefined;
+    const { frameCaptureMs, ffmpegMs } = await renderVideo(
+      scenes,
+      project.scenes,
+      fps,
+      totalFrames,
+      outputPath,
+      undefined,
+      undefined,
+      tracks,
+    );
 
     console.log(`[GET render] frame capture (${totalFrames} frames): ${frameCaptureMs}ms, ffmpeg encode: ${ffmpegMs}ms, total: ${frameCaptureMs + ffmpegMs}ms`);
 
@@ -744,13 +800,15 @@ app.get("/api/render/:projectId/stream", async (c) => {
     return c.json({ error: "Project not found" }, 404);
   }
 
+  const tracks = Array.isArray(project.timeline?.tracks) ? project.timeline.tracks : undefined;
   const scenes = deserializeServerScenes(project.scenes);
-  if (scenes.length === 0) {
+  if (!tracks && scenes.length === 0) {
     return c.json({ error: "No scenes to render" }, 400);
   }
 
-  const ranges = getSceneFrameRanges(scenes, fps);
-  const totalFrames = ranges[ranges.length - 1]?.endFrame ?? 0;
+  const totalFrames = tracks
+    ? Math.ceil(((project.timeline?.duration ?? 0) * fps))
+    : (getSceneFrameRanges(scenes, fps).at(-1)?.endFrame ?? 0);
   if (totalFrames <= 0) {
     return c.json({ error: "No frames to render" }, 400);
   }
@@ -781,6 +839,7 @@ app.get("/api/render/:projectId/stream", async (c) => {
       mkdir(tmpDir, { recursive: true }).then(async () => {
         try {
           const outputPath = path.join(tmpDir, "output.mp4");
+          const tracks = Array.isArray(project.timeline?.tracks) ? project.timeline.tracks : undefined;
           const { frameCaptureMs, ffmpegMs } = await renderVideo(
             scenes,
             project.scenes,
@@ -789,6 +848,7 @@ app.get("/api/render/:projectId/stream", async (c) => {
             outputPath,
             undefined,
             undefined,
+            tracks,
             {
               signal: abortController.signal,
               onFrameUpdate: (rendered, total) => {
@@ -863,13 +923,15 @@ app.post("/api/render", async (c) => {
     return c.json({ error: "Project not found" }, 404);
   }
 
+  const tracks = Array.isArray(project.timeline?.tracks) ? project.timeline.tracks : undefined;
   const scenes = deserializeServerScenes(project.scenes);
-  if (scenes.length === 0) {
+  if (!tracks && scenes.length === 0) {
     return c.json({ error: "No scenes to render" }, 400);
   }
 
-  const ranges = getSceneFrameRanges(scenes, fps);
-  const totalFrames = ranges[ranges.length - 1]?.endFrame ?? 0;
+  const totalFrames = tracks
+    ? Math.ceil(((project.timeline?.duration ?? 0) * fps))
+    : (getSceneFrameRanges(scenes, fps).at(-1)?.endFrame ?? 0);
   if (totalFrames <= 0) {
     return c.json({ error: "No frames to render" }, 400);
   }
@@ -895,7 +957,16 @@ app.post("/api/render", async (c) => {
       }
     }
 
-    const { frameCaptureMs, ffmpegMs } = await renderVideo(scenes, project.scenes, fps, totalFrames, outputPath, bgmPath, beatTimings);
+    const { frameCaptureMs, ffmpegMs } = await renderVideo(
+      scenes,
+      project.scenes,
+      fps,
+      totalFrames,
+      outputPath,
+      bgmPath,
+      beatTimings,
+      tracks,
+    );
 
     console.log(`[POST render] frame capture (${totalFrames} frames): ${frameCaptureMs}ms, ffmpeg encode: ${ffmpegMs}ms, total: ${frameCaptureMs + ffmpegMs}ms`);
 
