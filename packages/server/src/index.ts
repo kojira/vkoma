@@ -1023,6 +1023,133 @@ async function writeAssetLibrary(projectId: string, library: AssetLibrary): Prom
   await writeFile(metaFile, JSON.stringify(library, null, 2), "utf8");
 }
 
+const AUDIO_EXTENSIONS = [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"];
+const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mov"];
+const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"];
+
+function inferAssetType(mimeType: string, filename: string) {
+  const normalizedMimeType = mimeType.split(";")[0].trim().toLowerCase();
+  let assetType = getAssetType(normalizedMimeType);
+  if (assetType) {
+    return assetType;
+  }
+
+  const extension = path.extname(filename).toLowerCase();
+  if (AUDIO_EXTENSIONS.includes(extension)) {
+    return "audio" as const;
+  }
+  if (VIDEO_EXTENSIONS.includes(extension)) {
+    return "video" as const;
+  }
+  if (IMAGE_EXTENSIONS.includes(extension)) {
+    return "image" as const;
+  }
+  return null;
+}
+
+function extensionForMimeType(mimeType: string): string {
+  const normalizedMimeType = mimeType.split(";")[0].trim().toLowerCase();
+  const extensionMap: Record<string, string> = {
+    "audio/mp4": ".mp4",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/x-m4a": ".m4a",
+    "audio/aac": ".aac",
+    "audio/ogg": ".ogg",
+    "audio/flac": ".flac",
+    "audio/webm": ".webm",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/svg+xml": ".svg",
+  };
+  return extensionMap[normalizedMimeType] ?? "";
+}
+
+function sanitizeFilename(filename: string): string {
+  const trimmed = filename.trim();
+  if (!trimmed) {
+    return "download";
+  }
+
+  const sanitized = path.basename(trimmed).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
+  return sanitized.length > 0 ? sanitized : "download";
+}
+
+function filenameFromUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const rawSegment = parsed.pathname.split("/").pop();
+    if (!rawSegment) {
+      return null;
+    }
+
+    return sanitizeFilename(decodeURIComponent(rawSegment));
+  } catch {
+    return null;
+  }
+}
+
+async function saveAssetFile(
+  projectId: string,
+  fileData: Uint8Array,
+  filename: string,
+  mimeType: string,
+): Promise<Asset> {
+  const normalizedMimeType = mimeType.split(";")[0].trim().toLowerCase();
+  const safeFilename = sanitizeFilename(filename);
+  const assetType = inferAssetType(normalizedMimeType, safeFilename);
+  if (!assetType) {
+    throw new Error(`Unsupported MIME type: ${normalizedMimeType}`);
+  }
+
+  const assetsDir = getAssetsDir(projectId);
+  await mkdir(assetsDir, { recursive: true });
+
+  const destPath = path.join(assetsDir, safeFilename);
+  await writeFile(destPath, fileData);
+
+  const fileStat = await stat(destPath);
+
+  let width: number | undefined;
+  let height: number | undefined;
+  if (assetType === "image") {
+    try {
+      const img = await loadImage(destPath);
+      width = img.width;
+      height = img.height;
+    } catch {
+      // 画像のメタデータ取得失敗は無視
+    }
+  }
+
+  const asset: Asset = {
+    id: crypto.randomUUID(),
+    type: assetType,
+    name: safeFilename,
+    filename: safeFilename,
+    mimeType: normalizedMimeType,
+    size: fileStat.size,
+    ...(width !== undefined && { width }),
+    ...(height !== undefined && { height }),
+    duration: 0,
+    projectPath: `assets/${safeFilename}`,
+    createdAt: new Date().toISOString(),
+  };
+
+  const library = await readAssetLibrary(projectId);
+  library.assets.push(asset);
+  await writeAssetLibrary(projectId, library);
+
+  return asset;
+}
+
 // ─────────────────────────────────────────────
 // Asset CRUD endpoints
 // ─────────────────────────────────────────────
@@ -1048,68 +1175,73 @@ app.post("/api/projects/:id/assets", async (c) => {
       return c.json({ error: "file field is required" }, 400);
     }
 
-    let assetType = getAssetType(file.type);
-    if (!assetType) {
-      const extension = path.extname(file.name).toLowerCase();
-      if ([".mp3", ".wav", ".m4a", ".ogg", ".flac"].includes(extension)) {
-        assetType = "audio";
-      } else if ([".mp4", ".webm", ".mov"].includes(extension)) {
-        assetType = "video";
-      } else if ([".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"].includes(extension)) {
-        assetType = "image";
-      }
-    }
-    if (!assetType) {
-      return c.json({ error: `Unsupported MIME type: ${file.type}` }, 400);
-    }
-
-    const assetsDir = getAssetsDir(projectId);
-    await mkdir(assetsDir, { recursive: true });
-
-    // ファイル名の衝突を避けるためにUUIDプレフィックスを付けない（元のファイル名を保持）
-    const filename = file.name;
-    const destPath = path.join(assetsDir, filename);
-
     const arrayBuffer = await file.arrayBuffer();
-    await writeFile(destPath, new Uint8Array(arrayBuffer));
+    const asset = await saveAssetFile(projectId, new Uint8Array(arrayBuffer), file.name, file.type);
+    return c.json({ asset }, 201);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Unsupported MIME type:")) {
+      return c.json({ error: err.message }, 400);
+    }
+    return c.json({ error: String(err) }, 500);
+  }
+});
 
-    // ファイルサイズを取得
-    const fileStat = await stat(destPath);
+// POST /api/projects/:id/assets/fetch-url — URLからアセット取得
+app.post("/api/projects/:id/assets/fetch-url", async (c) => {
+  const projectId = c.req.param("id");
+  try {
+    const body = await c.req.json().catch(() => null);
+    const url = typeof body?.url === "string" ? body.url.trim() : "";
+    const requestedFilename =
+      typeof body?.filename === "string" && body.filename.trim().length > 0
+        ? sanitizeFilename(body.filename)
+        : null;
 
-    // 画像の場合はwidth/heightを取得
-    let width: number | undefined;
-    let height: number | undefined;
-    if (assetType === "image") {
-      try {
-        const img = await loadImage(destPath);
-        width = img.width;
-        height = img.height;
-      } catch {
-        // 画像のメタデータ取得失敗は無視
-      }
+    if (!url) {
+      return c.json({ error: "url is required" }, 400);
     }
 
-    const assetId = crypto.randomUUID();
-    const asset: Asset = {
-      id: assetId,
-      type: assetType,
-      name: file.name,
-      filename,
-      mimeType: file.type,
-      size: fileStat.size,
-      ...(width !== undefined && { width }),
-      ...(height !== undefined && { height }),
-      duration: 0,
-      projectPath: `assets/${filename}`,
-      createdAt: new Date().toISOString(),
-    };
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      return c.json({ error: "Invalid URL" }, 400);
+    }
 
-    const library = await readAssetLibrary(projectId);
-    library.assets.push(asset);
-    await writeAssetLibrary(projectId, library);
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+      return c.json({ error: "Only HTTP(S) URLs are supported" }, 400);
+    }
 
-    return c.json(asset, 201);
+    const response = await fetch(parsedUrl, {
+      signal: AbortSignal.timeout(60_000),
+      headers: {
+        Accept: "*/*",
+      },
+    });
+
+    if (!response.ok) {
+      return c.json(
+        { error: `Failed to fetch URL: ${response.status} ${response.statusText}` },
+        400,
+      );
+    }
+
+    const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+    const inferredFilename = requestedFilename ?? filenameFromUrl(parsedUrl.toString()) ?? "download";
+    const filename = path.extname(inferredFilename)
+      ? inferredFilename
+      : `${inferredFilename}${extensionForMimeType(contentType)}`;
+    const arrayBuffer = await response.arrayBuffer();
+    const asset = await saveAssetFile(projectId, new Uint8Array(arrayBuffer), filename, contentType);
+
+    return c.json({ asset }, 201);
   } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Unsupported MIME type:")) {
+      return c.json({ error: err.message }, 400);
+    }
+    if (err instanceof Error && err.name === "TimeoutError") {
+      return c.json({ error: "Timed out while fetching the remote file" }, 504);
+    }
     return c.json({ error: String(err) }, 500);
   }
 });
