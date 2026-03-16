@@ -282,3 +282,7 @@ export type { Track, TrackItem, TrackType, Keyframe } from './timeline';
 export { getTimelineDuration, getItemsAtTime } from './timeline';
 export type { ProjectV1, ProjectV1Scene, ProjectV2, ProjectV2Timeline } from './migration';
 export { migrateV1ToV2 } from './migration';
+
+// Asset management
+export type { Asset, AssetType, AssetLibrary } from './asset';
+export { getAssetType, getAssetsByType } from './asset';

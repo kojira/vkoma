@@ -1,11 +1,13 @@
 import { serve } from "@hono/node-server";
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
+import { createReadStream } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
-import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
+import { createCanvas, loadImage, GlobalFonts } from "@napi-rs/canvas";
 import {
   type SceneParam,
   defineScene,
@@ -15,6 +17,9 @@ import {
   getSceneFrameRanges,
   getSceneAtFrame,
   type SceneItem,
+  type Asset,
+  type AssetLibrary,
+  getAssetType,
 } from "../../core/src/index";
 import { analyzeAudio } from "./audio-analyze.js";
 import { createAudioAnalyzer } from '../../audio/src/index.js';
@@ -904,6 +909,166 @@ app.post("/api/render", async (c) => {
     });
   } finally {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+// ─────────────────────────────────────────────
+// Asset management helpers
+// ─────────────────────────────────────────────
+
+function getAssetsDir(projectId: string) {
+  return path.join(getProjectDir(projectId), "assets");
+}
+
+function getAssetsMetaFile(projectId: string) {
+  return path.join(getProjectDir(projectId), "assets.json");
+}
+
+async function readAssetLibrary(projectId: string): Promise<AssetLibrary> {
+  const metaFile = getAssetsMetaFile(projectId);
+  try {
+    const raw = await readFile(metaFile, "utf8");
+    return JSON.parse(raw) as AssetLibrary;
+  } catch {
+    return { assets: [] };
+  }
+}
+
+async function writeAssetLibrary(projectId: string, library: AssetLibrary): Promise<void> {
+  const metaFile = getAssetsMetaFile(projectId);
+  await writeFile(metaFile, JSON.stringify(library, null, 2), "utf8");
+}
+
+// ─────────────────────────────────────────────
+// Asset CRUD endpoints
+// ─────────────────────────────────────────────
+
+// GET /api/projects/:id/assets — アセット一覧取得
+app.get("/api/projects/:id/assets", async (c) => {
+  const projectId = c.req.param("id");
+  try {
+    const library = await readAssetLibrary(projectId);
+    return c.json(library);
+  } catch (err) {
+    return c.json({ error: String(err) }, 500);
+  }
+});
+
+// POST /api/projects/:id/assets — ファイルアップロード
+app.post("/api/projects/:id/assets", async (c) => {
+  const projectId = c.req.param("id");
+  try {
+    const formData = await c.req.formData();
+    const file = formData.get("file") as File | null;
+    if (!file) {
+      return c.json({ error: "file field is required" }, 400);
+    }
+
+    const assetType = getAssetType(file.type);
+    if (!assetType) {
+      return c.json({ error: `Unsupported MIME type: ${file.type}` }, 400);
+    }
+
+    const assetsDir = getAssetsDir(projectId);
+    await mkdir(assetsDir, { recursive: true });
+
+    // ファイル名の衝突を避けるためにUUIDプレフィックスを付けない（元のファイル名を保持）
+    const filename = file.name;
+    const destPath = path.join(assetsDir, filename);
+
+    const arrayBuffer = await file.arrayBuffer();
+    await writeFile(destPath, new Uint8Array(arrayBuffer));
+
+    // ファイルサイズを取得
+    const fileStat = await stat(destPath);
+
+    // 画像の場合はwidth/heightを取得
+    let width: number | undefined;
+    let height: number | undefined;
+    if (assetType === "image") {
+      try {
+        const img = await loadImage(destPath);
+        width = img.width;
+        height = img.height;
+      } catch {
+        // 画像のメタデータ取得失敗は無視
+      }
+    }
+
+    const assetId = crypto.randomUUID();
+    const asset: Asset = {
+      id: assetId,
+      type: assetType,
+      name: file.name,
+      filename,
+      mimeType: file.type,
+      size: fileStat.size,
+      ...(width !== undefined && { width }),
+      ...(height !== undefined && { height }),
+      duration: 0,
+      projectPath: `assets/${filename}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    const library = await readAssetLibrary(projectId);
+    library.assets.push(asset);
+    await writeAssetLibrary(projectId, library);
+
+    return c.json(asset, 201);
+  } catch (err) {
+    return c.json({ error: String(err) }, 500);
+  }
+});
+
+// DELETE /api/projects/:id/assets/:assetId — アセット削除
+app.delete("/api/projects/:id/assets/:assetId", async (c) => {
+  const projectId = c.req.param("id");
+  const assetId = c.req.param("assetId");
+  try {
+    const library = await readAssetLibrary(projectId);
+    const assetIndex = library.assets.findIndex((a) => a.id === assetId);
+    if (assetIndex === -1) {
+      return c.json({ error: "Asset not found" }, 404);
+    }
+
+    const asset = library.assets[assetIndex];
+    const filePath = path.join(getProjectDir(projectId), asset.projectPath);
+
+    // ファイル削除（存在しなくてもOK）
+    await unlink(filePath).catch(() => {});
+
+    // メタデータから削除
+    library.assets.splice(assetIndex, 1);
+    await writeAssetLibrary(projectId, library);
+
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json({ error: String(err) }, 500);
+  }
+});
+
+// GET /api/projects/:id/assets/:assetId/file — アセットファイル取得
+app.get("/api/projects/:id/assets/:assetId/file", async (c) => {
+  const projectId = c.req.param("id");
+  const assetId = c.req.param("assetId");
+  try {
+    const library = await readAssetLibrary(projectId);
+    const asset = library.assets.find((a) => a.id === assetId);
+    if (!asset) {
+      return c.json({ error: "Asset not found" }, 404);
+    }
+
+    const filePath = path.join(getProjectDir(projectId), asset.projectPath);
+    const data = await readFile(filePath);
+    return new Response(new Uint8Array(data), {
+      headers: {
+        "Content-Type": asset.mimeType,
+        "Content-Disposition": `inline; filename="${asset.filename}"`,
+        "Content-Length": String(asset.size),
+      },
+    });
+  } catch (err) {
+    return c.json({ error: String(err) }, 500);
   }
 });
 
