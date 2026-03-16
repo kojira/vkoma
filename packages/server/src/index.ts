@@ -690,20 +690,51 @@ Respond with ONLY a JSON object: {"scenes": [...]}
           } catch {
             parsed = { result: stdout };
           }
-
           const text = typeof parsed.result === "string" ? parsed.result : stdout;
 
-          const jsonMatch = text.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) {
+          // Extract JSON from various formats (markdown code blocks or raw JSON)
+          const extractJSON = (rawText: string): string | null => {
+            // 1. Try markdown code block ```json...``` or ```...```
+            const codeBlockMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (codeBlockMatch) {
+              const candidate = codeBlockMatch[1].trim();
+              if (candidate.startsWith("{")) return candidate;
+            }
+            // 2. Try raw JSON object
+            const jsonObjMatch = rawText.match(/\{[\s\S]*\}/);
+            if (jsonObjMatch) return jsonObjMatch[0];
+            return null;
+          };
+
+          const jsonStr = extractJSON(text);
+          if (!jsonStr) {
+            console.error(
+              "[ai/generate] Failed to extract JSON. stdout[:500]:",
+              stdout.slice(0, 500),
+              "text[:500]:",
+              text.slice(0, 500),
+            );
             send({ error: "Failed to parse AI response", done: true });
             closeController();
             return;
           }
 
-          const generated = JSON.parse(jsonMatch[0]) as { scenes?: unknown[] };
+          let generated: { scenes?: unknown[] };
+          try {
+            generated = JSON.parse(jsonStr) as { scenes?: unknown[] };
+          } catch (parseErr) {
+            console.error(
+              "[ai/generate] JSON.parse failed. jsonStr[:500]:",
+              jsonStr.slice(0, 500),
+            );
+            send({ error: "Failed to parse AI response: invalid JSON", done: true });
+            closeController();
+            return;
+          }
           send({ scenes: generated.scenes ?? [], done: true });
         } catch (err) {
           const message = err instanceof Error ? err.message : "Unknown error";
+          console.error("[ai/generate] Unexpected error:", err);
           send({ error: message, done: true });
         }
         closeController();
