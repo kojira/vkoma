@@ -80,6 +80,19 @@ function AssetCard({ asset, onRemove }: { asset: Asset; onRemove: (id: string) =
   );
 }
 
+function getAcceptForTab(tab: TabType): string {
+  switch (tab) {
+    case "image":
+      return "image/jpeg,image/png,image/gif,image/webp,image/svg+xml";
+    case "audio":
+      return "audio/mp3,audio/mpeg,audio/wav,audio/x-wav,audio/wave,audio/m4a,audio/x-m4a,audio/aac,audio/ogg";
+    case "video":
+      return "video/mp4,video/webm,video/quicktime";
+    default:
+      return "audio/mp3,audio/mpeg,audio/wav,audio/x-wav,audio/wave,audio/m4a,audio/x-m4a,audio/aac,audio/ogg,video/mp4,video/webm,video/quicktime,image/jpeg,image/png,image/gif,image/webp";
+  }
+}
+
 export function AssetLibrary() {
   const projectId = useSceneStore((s) => s.currentProjectId);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -203,6 +216,7 @@ export function AssetLibrary() {
           ref={fileInputRef}
           type="file"
           multiple
+          accept={getAcceptForTab(activeTab)}
           className="hidden"
           onChange={(e) => {
             if (e.target.files) handleFiles(e.target.files);
