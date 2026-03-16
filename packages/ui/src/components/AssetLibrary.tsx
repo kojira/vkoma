@@ -189,7 +189,6 @@ export function AssetLibrary() {
           ref={fileInputRef}
           type="file"
           multiple
-          accept="image/*,audio/*,video/*"
           className="hidden"
           onChange={(e) => {
             if (e.target.files) handleFiles(e.target.files);

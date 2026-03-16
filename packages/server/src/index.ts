@@ -1048,7 +1048,17 @@ app.post("/api/projects/:id/assets", async (c) => {
       return c.json({ error: "file field is required" }, 400);
     }
 
-    const assetType = getAssetType(file.type);
+    let assetType = getAssetType(file.type);
+    if (!assetType) {
+      const extension = path.extname(file.name).toLowerCase();
+      if ([".mp3", ".wav", ".m4a", ".ogg", ".flac"].includes(extension)) {
+        assetType = "audio";
+      } else if ([".mp4", ".webm", ".mov"].includes(extension)) {
+        assetType = "video";
+      } else if ([".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"].includes(extension)) {
+        assetType = "image";
+      }
+    }
     if (!assetType) {
       return c.json({ error: `Unsupported MIME type: ${file.type}` }, 400);
     }
