@@ -88,6 +88,7 @@ export function AssetLibrary() {
   const [search, setSearch] = useState("");
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -113,7 +114,13 @@ export function AssetLibrary() {
         method: "POST",
         body: formData,
       });
-      if (!res.ok) throw new Error("Failed to upload asset");
+      if (!res.ok) {
+        if (res.status === 400) {
+          await res.json().catch(() => null);
+          throw new Error("このファイル形式には対応していません");
+        }
+        throw new Error("Failed to upload asset");
+      }
 
       const data = (await res.json()) as { asset?: Asset };
       if (data.asset) setAssets((prev) => [...prev, data.asset as Asset]);
@@ -143,10 +150,17 @@ export function AssetLibrary() {
   const handleFiles = useCallback(
     async (files: FileList | File[]) => {
       if (!projectId) return;
+      setUploadError(null);
       setUploading(true);
       try {
         for (const file of Array.from(files)) {
-          await uploadAsset(file);
+          try {
+            await uploadAsset(file);
+          } catch (error) {
+            setUploadError(
+              error instanceof Error ? error.message : "Failed to upload asset"
+            );
+          }
         }
       } finally {
         setUploading(false);
@@ -196,6 +210,17 @@ export function AssetLibrary() {
           }}
         />
       </div>
+
+      {uploadError ? (
+        <button
+          type="button"
+          onClick={() => setUploadError(null)}
+          className="flex items-center justify-between gap-2 rounded text-left text-xs text-red-400 hover:text-red-300"
+        >
+          <span>{uploadError}</span>
+          <span className="text-sm leading-none">×</span>
+        </button>
+      ) : null}
 
       {/* Search */}
       <input
