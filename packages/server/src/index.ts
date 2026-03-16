@@ -154,7 +154,7 @@ function deserializeServerScenes(rawScenes: unknown): SceneItem[] {
         return null;
       }
 
-      return {
+      const item: SceneItem = {
         id:
           typeof saved.id === "string" && saved.id.length > 0
             ? saved.id
@@ -169,6 +169,10 @@ function deserializeServerScenes(rawScenes: unknown): SceneItem[] {
           ...(saved.params && typeof saved.params === "object" ? saved.params : {}),
         },
       };
+      if (saved.renderCode) {
+        (item as any).renderCode = saved.renderCode;
+      }
+      return item;
     })
     .filter((scene): scene is SceneItem => scene !== null);
 
