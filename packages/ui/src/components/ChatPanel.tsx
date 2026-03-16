@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { useSceneStore, allScenePresets } from "../stores/sceneStore";
 import { defineScene, params as sceneParams, type SceneParam } from "../../../../packages/core/src/index";
 
@@ -9,6 +9,7 @@ interface Message {
 }
 
 export function ChatPanel() {
+  const generatingStartTimeRef: MutableRefObject<number | null> = useRef(null);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
@@ -18,9 +19,32 @@ export function ChatPanel() {
   ]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [generatingBytes, setGeneratingBytes] = useState(0);
   const nextId = useRef(1);
 
   const canSend = useMemo(() => input.trim().length > 0 && !isSending, [input, isSending]);
+  const lastAssistantMessageId = useMemo(
+    () => [...messages].reverse().find((message) => message.role === "assistant")?.id ?? null,
+    [messages],
+  );
+
+  useEffect(() => {
+    if (!isSending || generatingStartTimeRef.current === null) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      if (generatingStartTimeRef.current === null) {
+        return;
+      }
+      setElapsedSeconds(Math.floor((Date.now() - generatingStartTimeRef.current) / 1000));
+    }, 1000);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [isSending]);
 
   const handleSend = async () => {
     const value = input.trim();
@@ -30,6 +54,9 @@ export function ChatPanel() {
 
     setInput("");
     setIsSending(true);
+    generatingStartTimeRef.current = Date.now();
+    setElapsedSeconds(0);
+    setGeneratingBytes(0);
 
     setMessages((current) => [
       ...current,
@@ -39,7 +66,7 @@ export function ChatPanel() {
     const streamingMsgId = `assistant-${nextId.current++}`;
     setMessages((current) => [
       ...current,
-      { id: streamingMsgId, role: "assistant", content: "Generating..." },
+      { id: streamingMsgId, role: "assistant", content: "GENERATING" },
     ]);
 
     try {
@@ -76,19 +103,27 @@ export function ChatPanel() {
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           const jsonStr = line.slice(6);
-          let event: { chunk?: string; scenes?: Array<{ id?: string; name?: string; duration?: number; params?: Record<string, unknown>; code?: string; renderCode?: string }>; error?: string; done?: boolean };
+          let event: {
+            type?: "chunk" | "heartbeat";
+            chunk?: string;
+            elapsed?: number;
+            scenes?: Array<{ id?: string; name?: string; duration?: number; params?: Record<string, unknown>; code?: string; renderCode?: string }>;
+            error?: string;
+            done?: boolean;
+          };
           try {
             event = JSON.parse(jsonStr);
           } catch {
             continue;
           }
 
-          if (event.chunk) {
-            setMessages((current) =>
-              current.map((m) =>
-                m.id === streamingMsgId ? { ...m, content: "Generating..." } : m,
-              ),
-            );
+          if (event.type === "chunk" && typeof event.chunk === "string") {
+            const chunkText = event.chunk;
+            setGeneratingBytes((bytes) => bytes + chunkText.length);
+          }
+
+          if (event.type === "heartbeat" && typeof event.elapsed === "number") {
+            setElapsedSeconds(event.elapsed);
           }
 
           if (event.done) {
@@ -190,6 +225,7 @@ export function ChatPanel() {
       );
     } finally {
       setIsSending(false);
+      generatingStartTimeRef.current = null;
     }
   };
 
@@ -201,32 +237,38 @@ export function ChatPanel() {
         </h2>
       </div>
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={
-              message.role === "user"
-                ? "ml-auto max-w-[85%] rounded-2xl rounded-br-sm bg-blue-500 px-3 py-2 text-sm text-white"
-                : message.content.startsWith("Error:")
-                  ? "max-w-[85%] rounded-2xl rounded-bl-sm bg-red-900/50 border border-red-500/30 px-3 py-2 text-sm text-red-300"
-                  : "max-w-[85%] rounded-2xl rounded-bl-sm bg-gray-800 px-3 py-2 text-sm text-gray-100"
-            }
-          >
-            {message.content === "Generating..." ? (
-              <span className="flex items-center gap-2">
-                <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                生成中...
-              </span>
-            ) : message.content.startsWith("Error:") ? (
-              <span className="flex items-center gap-1.5">⚠️ {message.content}</span>
-            ) : (
-              message.content
-            )}
-          </div>
-        ))}
+        {messages.map((message) => {
+          const isGeneratingMessage =
+            isSending && message.role === "assistant" && message.id === lastAssistantMessageId;
+
+          return (
+            <div
+              key={message.id}
+              className={
+                message.role === "user"
+                  ? "ml-auto max-w-[85%] rounded-2xl rounded-br-sm bg-blue-500 px-3 py-2 text-sm text-white"
+                  : message.content.startsWith("Error:")
+                    ? "max-w-[85%] rounded-2xl rounded-bl-sm border border-red-500/30 bg-red-900/50 px-3 py-2 text-sm text-red-300"
+                    : "max-w-[85%] rounded-2xl rounded-bl-sm bg-gray-800 px-3 py-2 text-sm text-gray-100"
+              }
+            >
+              {isGeneratingMessage ? (
+                <span className="flex items-center gap-2">
+                  <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  生成中... {elapsedSeconds > 0 ? `(${elapsedSeconds}秒)` : ""}
+                  {generatingBytes > 0 && <span className="ml-1 text-xs text-gray-400">{generatingBytes}文字受信</span>}
+                </span>
+              ) : message.content.startsWith("Error:") ? (
+                <span className="flex items-center gap-1.5">⚠️ {message.content}</span>
+              ) : (
+                message.content
+              )}
+            </div>
+          );
+        })}
       </div>
       <div className="border-t border-gray-800 p-4">
         <div className="flex gap-2">
@@ -249,7 +291,7 @@ export function ChatPanel() {
             disabled={!canSend}
             className="rounded-md bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:bg-gray-700"
           >
-            Send
+            {isSending ? "生成中..." : "Send"}
           </button>
         </div>
       </div>

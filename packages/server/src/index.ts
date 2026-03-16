@@ -650,9 +650,13 @@ Respond with ONLY a JSON object: {"scenes": [...]}
       };
 
       const claudePath = process.env.CLAUDE_PATH || "/Users/kojira/.local/bin/claude";
+      const startTime = Date.now();
       const child = spawn(claudePath, ["-p", fullPrompt, "--output-format", "json"], {
         stdio: ["pipe", "pipe", "pipe"],
       });
+      const heartbeatTimer = setInterval(() => {
+        send({ type: "heartbeat", elapsed: Math.floor((Date.now() - startTime) / 1000) });
+      }, 3000);
 
       let stdout = "";
       let stderr = "";
@@ -660,7 +664,7 @@ Respond with ONLY a JSON object: {"scenes": [...]}
       child.stdout.on("data", (data: Buffer) => {
         const chunk = data.toString();
         stdout += chunk;
-        send({ chunk });
+        send({ type: "chunk", chunk });
       });
 
       child.stderr.on("data", (data: Buffer) => {
@@ -668,6 +672,7 @@ Respond with ONLY a JSON object: {"scenes": [...]}
       });
 
       child.on("close", (code) => {
+        clearInterval(heartbeatTimer);
         if (code !== 0) {
           const error =
             code === 143
@@ -705,6 +710,7 @@ Respond with ONLY a JSON object: {"scenes": [...]}
       });
 
       child.on("error", (err) => {
+        clearInterval(heartbeatTimer);
         send({ error: err.message, done: true });
         closeController();
       });
