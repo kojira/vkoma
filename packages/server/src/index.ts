@@ -615,24 +615,8 @@ When generating scenes for "IrisOut" or "IRIS OUT" band music videos, use: gradi
 Respond with ONLY a JSON object: {"scenes": [...]}
 `;
 
-  let fullPrompt = systemPrompt + "\n\nUser request: " + userPrompt;
-
-  try {
-    const specPath = path.resolve(__dirname, "../../..", "docs/scene-authoring.md");
-    const specContent = await readFile(specPath, "utf-8");
-    fullPrompt =
-      "以下はvKomaのシーン作成ガイドです。このガイドに従ってシーンコードを生成してください。\n\n" +
-      specContent +
-      "\n\n---\n\n" +
-      systemPrompt +
-      "\n\nUser request: " +
-      userPrompt;
-  } catch {
-    // scene-authoring.md読み込み失敗時は既存のfullPromptにフォールバック
-  }
-
   const stream = new ReadableStream({
-    start(controller) {
+    async start(controller) {
       const encoder = new TextEncoder();
       let closed = false;
       const send = (obj: Record<string, unknown>) => {
@@ -649,11 +633,32 @@ Respond with ONLY a JSON object: {"scenes": [...]}
         try { controller.close(); } catch { /* already closed */ }
       };
 
+      let effectiveSystemPrompt = systemPrompt;
+      try {
+        const specPath = path.resolve(__dirname, "../../..", "docs/scene-authoring.md");
+        const specContent = await readFile(specPath, "utf-8");
+        effectiveSystemPrompt =
+          "以下はvKomaのシーン作成ガイドです。このガイドに従ってシーンコードを生成してください。\n\n" +
+          specContent +
+          "\n\n---\n\n" +
+          systemPrompt;
+      } catch {
+        // Use systemPrompt as fallback
+      }
+
       const claudePath = process.env.CLAUDE_PATH || "/Users/kojira/.local/bin/claude";
       const startTime = Date.now();
-      const child = spawn(claudePath, ["-p", fullPrompt, "--output-format", "json"], {
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      const child = spawn(
+        claudePath,
+        [
+          "--system-prompt", effectiveSystemPrompt,
+          "-p", userPrompt,
+          "--output-format", "text",
+        ],
+        {
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
       const heartbeatTimer = setInterval(() => {
         send({ type: "heartbeat", elapsed: Math.floor((Date.now() - startTime) / 1000) });
       }, 3000);
@@ -684,13 +689,7 @@ Respond with ONLY a JSON object: {"scenes": [...]}
         }
 
         try {
-          let parsed: { result?: string };
-          try {
-            parsed = JSON.parse(stdout);
-          } catch {
-            parsed = { result: stdout };
-          }
-          const text = typeof parsed.result === "string" ? parsed.result : stdout;
+          const text = stdout;
 
           // Extract JSON from various formats (markdown code blocks or raw JSON)
           const extractJSON = (rawText: string): string | null => {
@@ -711,8 +710,6 @@ Respond with ONLY a JSON object: {"scenes": [...]}
             console.error(
               "[ai/generate] Failed to extract JSON. stdout[:500]:",
               stdout.slice(0, 500),
-              "text[:500]:",
-              text.slice(0, 500),
             );
             send({ error: "Failed to parse AI response", done: true });
             closeController();
