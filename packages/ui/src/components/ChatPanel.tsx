@@ -1,12 +1,7 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useSceneStore, allScenePresets } from "../stores/sceneStore";
+import { useChatStore } from "../stores/chatStore";
 import { defineScene, params as sceneParams, type SceneParam } from "../../../../packages/core/src/index";
-
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-}
 
 type GeneratedScene = {
   id?: string;
@@ -25,16 +20,11 @@ type SSEEvent =
   | { chunk: string; type?: undefined };
 
 export function ChatPanel() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content: "Describe the scene you want to build.",
-    },
-  ]);
+  const messages = useChatStore((state) => state.messages);
+  const addMessage = useChatStore((state) => state.addMessage);
+  const updateMessage = useChatStore((state) => state.updateMessage);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const nextId = useRef(1);
 
   const canSend = useMemo(() => input.trim().length > 0 && !isSending, [input, isSending]);
 
@@ -47,16 +37,14 @@ export function ChatPanel() {
     setInput("");
     setIsSending(true);
 
-    setMessages((current) => [
-      ...current,
-      { id: `user-${nextId.current++}`, role: "user", content: value },
-    ]);
+    addMessage({
+      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      role: "user",
+      content: value,
+    });
 
-    const streamingMsgId = `assistant-${nextId.current++}`;
-    setMessages((current) => [
-      ...current,
-      { id: streamingMsgId, role: "assistant", content: "生成中..." },
-    ]);
+    const streamingMsgId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    addMessage({ id: streamingMsgId, role: "assistant", content: "生成中..." });
 
     try {
       const response = await fetch("/api/ai/generate", {
@@ -69,11 +57,7 @@ export function ChatPanel() {
       });
 
       if (!response.ok || !response.body) {
-        setMessages((current) =>
-          current.map((m) =>
-            m.id === streamingMsgId ? { ...m, content: "Error: Request failed" } : m,
-          ),
-        );
+        updateMessage(streamingMsgId, "Error: Request failed");
         return;
       }
 
@@ -105,32 +89,16 @@ export function ChatPanel() {
             ("chunk" in event && typeof event.chunk === "string")
           ) {
             totalBytes += event.chunk.length;
-            setMessages((current) =>
-              current.map((m) =>
-                m.id === streamingMsgId
-                  ? { ...m, content: `生成中... (${totalBytes}バイト受信)` }
-                  : m,
-              ),
-            );
+            updateMessage(streamingMsgId, `生成中... (${totalBytes}バイト受信)`);
           }
 
           if ("type" in event && event.type === "heartbeat") {
-            setMessages((current) =>
-              current.map((m) =>
-                m.id === streamingMsgId
-                  ? { ...m, content: `生成中... (${event.elapsed}秒経過)` }
-                  : m,
-              ),
-            );
+            updateMessage(streamingMsgId, `生成中... (${event.elapsed}秒経過)`);
           }
 
           if ("done" in event && event.done) {
             if ("error" in event) {
-              setMessages((current) =>
-                current.map((m) =>
-                  m.id === streamingMsgId ? { ...m, content: `Error: ${event.error}` } : m,
-                ),
-              );
+              updateMessage(streamingMsgId, `Error: ${event.error}`);
               return;
             }
 
@@ -209,23 +177,14 @@ export function ChatPanel() {
               }
             }
 
-            setMessages((current) =>
-              current.map((m) =>
-                m.id === streamingMsgId
-                  ? { ...m, content: `✅ ${scenes.length}シーンを生成しました` }
-                  : m,
-              ),
-            );
+            updateMessage(streamingMsgId, `✅ ${scenes.length}シーンを生成しました`);
           }
         }
       }
     } catch (error) {
-      setMessages((current) =>
-        current.map((m) =>
-          m.id === streamingMsgId
-            ? { ...m, content: `Error: ${error instanceof Error ? error.message : "Unknown error"}` }
-            : m,
-        ),
+      updateMessage(
+        streamingMsgId,
+        `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
     } finally {
       setIsSending(false);
