@@ -199,7 +199,7 @@ export type { SpringConfig } from "./utils/spring";
 export { random, randomInt } from "./utils/random";
 export { measureTextCached, fitText, wrapText, fillTextBox } from "./utils/textUtils";
 export { renderWithTransition } from "./utils/transition";
-export type { TransitionType } from "./utils/transition";
+export type { TransitionType, TransitionConfig } from "./utils/transition";
 export { parseColor, colorToString, interpolateColors } from "./utils/colors";
 export type { RGBAColor } from "./utils/colors";
 
@@ -278,3 +278,7 @@ export type { TextPartParams, TextEffect } from './parts/TextPart';
 export type { ImagePartParams, ImageEffect, ImageFit } from './parts/ImagePart';
 export type { ShapePartParams, ShapeType, ShapeEffect } from './parts/ShapePart';
 export type { BackgroundPartParams, BackgroundType } from './parts/BackgroundPart';
+export type { Track, TrackItem, TrackType, Keyframe } from './timeline';
+export { getTimelineDuration, getItemsAtTime } from './timeline';
+export type { ProjectV1, ProjectV1Scene, ProjectV2, ProjectV2Timeline } from './migration';
+export { migrateV1ToV2 } from './migration';

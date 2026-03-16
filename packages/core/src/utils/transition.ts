@@ -4,6 +4,16 @@ export type TransitionType =
   | "slide-left"
   | "slide-right";
 
+import type { EasingType } from "../params";
+
+export interface TransitionConfig {
+  type: TransitionType;
+  duration: number;
+  easing: EasingType;
+  color?: string;
+  direction?: "ltr" | "rtl";
+}
+
 export function renderWithTransition(options: {
   ctx: CanvasRenderingContext2D;
   width: number;
