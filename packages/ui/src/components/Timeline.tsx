@@ -1,227 +1,218 @@
-// cache-bust: 1
-import { useEffect, useRef, useState } from "react";
-import { getSceneFrameRanges, useSceneStore } from "../stores/sceneStore";
+import { useEffect, useMemo, useRef } from "react";
+import type { Track, TrackItem, TrackType } from "../../../../packages/core/src/timeline";
+import { useTimelineStore } from "../stores/timelineStore";
 
-function formatTime(frame: number, fps: number) {
-  const totalSeconds = frame / fps;
-  const minutes = Math.floor(totalSeconds / 60)
+const HEADER_WIDTH = 160;
+const ROW_HEIGHT = 56;
+const PIXELS_PER_SECOND = 120;
+const MIN_TIMELINE_SECONDS = 10;
+
+function formatTime(seconds: number) {
+  const safeSeconds = Math.max(0, seconds);
+  const minutes = Math.floor(safeSeconds / 60)
     .toString()
     .padStart(2, "0");
-  const seconds = Math.floor(totalSeconds % 60)
+  const remainder = Math.floor(safeSeconds % 60)
     .toString()
     .padStart(2, "0");
 
-  return `${minutes}:${seconds}`;
+  return `${minutes}:${remainder}`;
+}
+
+function getTrackStyles(type: TrackType) {
+  switch (type) {
+    case "video":
+      return {
+        block: "border-sky-400/40 bg-sky-500/25 text-sky-100",
+        badge: "bg-sky-500/20 text-sky-200",
+      };
+    case "image":
+      return {
+        block: "border-emerald-400/40 bg-emerald-500/25 text-emerald-100",
+        badge: "bg-emerald-500/20 text-emerald-200",
+      };
+    case "text":
+      return {
+        block: "border-amber-400/40 bg-amber-500/25 text-amber-100",
+        badge: "bg-amber-500/20 text-amber-200",
+      };
+    case "audio":
+      return {
+        block: "border-fuchsia-400/40 bg-fuchsia-500/25 text-fuchsia-100",
+        badge: "bg-fuchsia-500/20 text-fuchsia-200",
+      };
+    case "shape":
+      return {
+        block: "border-rose-400/40 bg-rose-500/25 text-rose-100",
+        badge: "bg-rose-500/20 text-rose-200",
+      };
+    default:
+      return {
+        block: "border-gray-600 bg-gray-700/70 text-gray-100",
+        badge: "bg-gray-700 text-gray-300",
+      };
+  }
+}
+
+function getItemLabel(item: TrackItem) {
+  if (typeof item.params.name === "string" && item.params.name.trim() !== "") {
+    return item.params.name;
+  }
+  if (item.assetId) {
+    return item.assetId;
+  }
+  if (item.sceneConfigId) {
+    return item.sceneConfigId;
+  }
+
+  return item.id;
+}
+
+function TrackHeader({
+  track,
+  onToggleVisible,
+  onToggleMuted,
+}: {
+  track: Track;
+  onToggleVisible: () => void;
+  onToggleMuted: () => void;
+}) {
+  const styles = getTrackStyles(track.type);
+
+  return (
+    <div
+      className="sticky left-0 z-10 flex h-14 items-center gap-3 border-b border-r border-gray-800 bg-gray-950/95 px-4 backdrop-blur"
+      style={{ width: `${HEADER_WIDTH}px` }}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-white">{track.name}</div>
+        <div
+          className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${styles.badge}`}
+        >
+          {track.type}
+        </div>
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onToggleVisible}
+          className={`rounded-md border px-2 py-1 text-[11px] font-medium transition ${
+            track.visible
+              ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-200"
+              : "border-gray-700 bg-gray-900 text-gray-500 hover:text-gray-300"
+          }`}
+          title={track.visible ? "Hide track" : "Show track"}
+        >
+          V
+        </button>
+        <button
+          type="button"
+          onClick={onToggleMuted}
+          className={`rounded-md border px-2 py-1 text-[11px] font-medium transition ${
+            track.muted
+              ? "border-rose-500/40 bg-rose-500/15 text-rose-200"
+              : "border-gray-700 bg-gray-900 text-gray-300 hover:text-white"
+          }`}
+          title={track.muted ? "Unmute track" : "Mute track"}
+        >
+          M
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TrackItemBlock({ item, trackType }: { item: TrackItem; trackType: TrackType }) {
+  const styles = getTrackStyles(trackType);
+
+  return (
+    <div
+      className={`absolute top-2 bottom-2 overflow-hidden rounded-lg border px-2 py-1 shadow-sm ${styles.block}`}
+      style={{
+        left: `${item.startTime * PIXELS_PER_SECOND}px`,
+        width: `${Math.max(item.duration * PIXELS_PER_SECOND, 8)}px`,
+      }}
+      title={`${getItemLabel(item)} • ${item.startTime.toFixed(2)}s - ${(item.startTime + item.duration).toFixed(2)}s`}
+    >
+      <div className="truncate text-xs font-medium">{getItemLabel(item)}</div>
+      <div className="truncate text-[10px] text-white/60">
+        {item.startTime.toFixed(1)}s • {item.duration.toFixed(1)}s
+      </div>
+    </div>
+  );
 }
 
 export function Timeline() {
   const timelineRef = useRef<HTMLDivElement | null>(null);
-  const sceneBarRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const touchDragTimerRef = useRef<number | null>(null);
-  const [dragState, setDragState] = useState<{
-    sceneId: string;
-    edge: "left" | "right";
-    startX: number;
-    startDuration: number;
-  } | null>(null);
-  const [touchDragState, setTouchDragState] = useState<{
-    sceneId: string;
-    fromIndex: number;
-    startX: number;
-    startY: number;
-    currentX: number;
-    currentY: number;
-    dragWidth: number;
-    targetIndex: number;
-    isDragging: boolean;
-  } | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const lastFrameTimeRef = useRef<number | null>(null);
 
-  const scenes = useSceneStore((state) => state.scenes);
-  const currentSceneIndex = useSceneStore((state) => state.currentSceneIndex);
-  const isPlaying = useSceneStore((state) => state.isPlaying);
-  const currentFrame = useSceneStore((state) => state.currentFrame);
-  const fps = useSceneStore((state) => state.fps);
-  const addScene = useSceneStore((state) => state.addScene);
-  const removeScene = useSceneStore((state) => state.removeScene);
-  const reorderScenes = useSceneStore((state) => state.reorderScenes);
-  const setCurrentScene = useSceneStore((state) => state.setCurrentScene);
-  const setPlaying = useSceneStore((state) => state.setPlaying);
-  const setCurrentFrame = useSceneStore((state) => state.setCurrentFrame);
-  const updateSceneDuration = useSceneStore((state) => state.updateSceneDuration);
-  const totalFrames = useSceneStore((state) => state.totalFrames());
+  const tracks = useTimelineStore((state) => state.tracks);
+  const fps = useTimelineStore((state) => state.fps);
+  const isPlaying = useTimelineStore((state) => state.isPlaying);
+  const currentTime = useTimelineStore((state) => state.currentTime);
+  const totalDuration = useTimelineStore((state) => state.totalDuration());
+  const setPlaying = useTimelineStore((state) => state.setPlaying);
+  const setCurrentTime = useTimelineStore((state) => state.setCurrentTime);
+  const updateTrack = useTimelineStore((state) => state.updateTrack);
 
-  const ranges = getSceneFrameRanges(scenes, fps);
-  const totalDuration = totalFrames / fps;
+  const timelineSeconds = Math.max(totalDuration, MIN_TIMELINE_SECONDS);
+  const timelineWidth = timelineSeconds * PIXELS_PER_SECOND;
 
-  const clearTouchDragTimer = () => {
-    if (touchDragTimerRef.current !== null) {
-      window.clearTimeout(touchDragTimerRef.current);
-      touchDragTimerRef.current = null;
-    }
-  };
-
-  const getTouchTargetIndex = (touchX: number, draggedSceneId: string) => {
-    const otherCenters = ranges
-      .filter((range) => range.scene.id !== draggedSceneId)
-      .map((range) => {
-        const element = sceneBarRefs.current[range.scene.id];
-        if (!element) {
-          return null;
-        }
-
-        const rect = element.getBoundingClientRect();
-        return rect.left + rect.width / 2;
-      })
-      .filter((center): center is number => center !== null);
-
-    let nextIndex = 0;
-    for (const center of otherCenters) {
-      if (touchX > center) {
-        nextIndex += 1;
-      }
-    }
-
-    return Math.max(0, Math.min(nextIndex, scenes.length - 1));
-  };
-
-  const resetTouchDrag = () => {
-    clearTouchDragTimer();
-    setTouchDragState(null);
-  };
+  const timeMarkers = useMemo(
+    () => Array.from({ length: Math.ceil(timelineSeconds) + 1 }, (_, index) => index),
+    [timelineSeconds],
+  );
 
   useEffect(() => {
-    if (!dragState) {
+    if (!isPlaying) {
+      lastFrameTimeRef.current = null;
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
       return;
     }
 
-    const handleMouseMove = (event: MouseEvent) => {
-      const timeline = timelineRef.current;
-      const draggedScene = scenes.find((scene) => scene.id === dragState.sceneId);
-      if (!timeline || !draggedScene) {
+    const tick = (timestamp: number) => {
+      const previousTimestamp = lastFrameTimeRef.current ?? timestamp;
+      const deltaSeconds = (timestamp - previousTimestamp) / 1000;
+      lastFrameTimeRef.current = timestamp;
+
+      const nextTime = currentTime + deltaSeconds;
+      if (nextTime >= totalDuration && totalDuration > 0) {
+        setCurrentTime(totalDuration);
+        setPlaying(false);
         return;
       }
 
-      const pixelsPerSecond = timeline.clientWidth / Math.max(totalDuration, 0.001);
-      const deltaSeconds =
-        ((event.clientX - dragState.startX) / Math.max(pixelsPerSecond, 1)) *
-        (dragState.edge === "right" ? 1 : -1);
-
-      updateSceneDuration(dragState.sceneId, dragState.startDuration + deltaSeconds);
+      setCurrentTime(nextTime);
+      rafRef.current = requestAnimationFrame(tick);
     };
 
-    const handleMouseUp = () => setDragState(null);
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
+    rafRef.current = requestAnimationFrame(tick);
 
     return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [dragState, scenes, totalDuration, updateSceneDuration]);
-
-  useEffect(() => {
-    if (!touchDragState) {
-      return;
-    }
-
-    const handleTouchMove = (event: TouchEvent) => {
-      const touch = event.touches[0];
-      if (!touch) {
-        return;
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
       }
-
-      setTouchDragState((currentState) => {
-        if (!currentState) {
-          return currentState;
-        }
-
-        const deltaX = touch.clientX - currentState.startX;
-        const deltaY = touch.clientY - currentState.startY;
-
-        if (!currentState.isDragging) {
-          if (Math.hypot(deltaX, deltaY) > 10) {
-            clearTouchDragTimer();
-            return null;
-          }
-
-          return {
-            ...currentState,
-            currentX: touch.clientX,
-            currentY: touch.clientY,
-          };
-        }
-
-        event.preventDefault();
-
-        return {
-          ...currentState,
-          currentX: touch.clientX,
-          currentY: touch.clientY,
-          targetIndex: getTouchTargetIndex(touch.clientX, currentState.sceneId),
-        };
-      });
+      lastFrameTimeRef.current = null;
     };
-
-    const handleTouchEnd = (event: TouchEvent) => {
-      clearTouchDragTimer();
-
-      setTouchDragState((currentState) => {
-        if (!currentState) {
-          return currentState;
-        }
-
-        if (currentState.isDragging) {
-          const touch = event.changedTouches[0];
-          const targetIndex = touch
-            ? getTouchTargetIndex(touch.clientX, currentState.sceneId)
-            : currentState.targetIndex;
-
-          if (targetIndex !== currentState.fromIndex) {
-            reorderScenes(currentState.fromIndex, targetIndex);
-          }
-        }
-
-        return null;
-      });
-    };
-
-    const handleTouchCancel = () => {
-      resetTouchDrag();
-    };
-
-    window.addEventListener("touchmove", handleTouchMove, { passive: false });
-    window.addEventListener("touchend", handleTouchEnd);
-    window.addEventListener("touchcancel", handleTouchCancel);
-
-    return () => {
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchend", handleTouchEnd);
-      window.removeEventListener("touchcancel", handleTouchCancel);
-    };
-  }, [reorderScenes, ranges, scenes.length, touchDragState]);
+  }, [currentTime, isPlaying, setCurrentTime, setPlaying, totalDuration]);
 
   const handleSeek = (clientX: number) => {
-    const timeline = timelineRef.current;
-    if (!timeline || totalFrames <= 0) {
+    const timelineElement = timelineRef.current;
+    if (!timelineElement) {
       return;
     }
 
-    const rect = timeline.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const nextFrame = Math.min(totalFrames - 1, Math.round(ratio * totalFrames));
+    const rect = timelineElement.getBoundingClientRect();
+    const offsetX = Math.max(0, Math.min(clientX - rect.left, rect.width));
+    const nextTime = offsetX / PIXELS_PER_SECOND;
 
-    setCurrentFrame(nextFrame);
-
-    const activeRange = ranges.find(
-      (range) => nextFrame >= range.startFrame && nextFrame < range.endFrame,
-    );
-    if (activeRange) {
-      setCurrentScene(activeRange.index);
-    }
+    setCurrentTime(Math.min(nextTime, timelineSeconds));
   };
-
-  const selectedScene = scenes[currentSceneIndex];
 
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-950 p-4">
@@ -238,8 +229,7 @@ export function Timeline() {
             type="button"
             onClick={() => {
               setPlaying(false);
-              setCurrentFrame(0);
-              setCurrentScene(0);
+              setCurrentTime(0);
             }}
             className="rounded-md bg-gray-800 px-3 py-2 text-sm font-medium text-white transition hover:bg-gray-700"
           >
@@ -248,9 +238,9 @@ export function Timeline() {
         </div>
         <div className="flex items-center gap-4 text-sm text-gray-300">
           <span>
-            {formatTime(currentFrame, fps)} / {formatTime(totalFrames, fps)}
+            {formatTime(currentTime)} / {formatTime(totalDuration)}
           </span>
-          <span>Frame {currentFrame + 1}</span>
+          <span>Frame {Math.floor(currentTime * fps) + 1}</span>
         </div>
       </div>
 
@@ -258,225 +248,116 @@ export function Timeline() {
         <input
           type="range"
           min={0}
-          max={totalFrames - 1}
-          value={currentFrame}
-          onChange={(event) => {
-            const nextFrame = Number.parseInt(event.target.value, 10);
-            setCurrentFrame(nextFrame);
-
-            const activeRange = ranges.find(
-              (range) => nextFrame >= range.startFrame && nextFrame < range.endFrame,
-            );
-            if (activeRange) {
-              setCurrentScene(activeRange.index);
-            }
-          }}
-          className="w-full h-4 cursor-pointer accent-blue-500"
-          style={{ minHeight: "44px" }}
+          max={Math.max(totalDuration, 0.01)}
+          step={0.01}
+          value={Math.min(currentTime, Math.max(totalDuration, 0.01))}
+          onChange={(event) => setCurrentTime(Number(event.target.value))}
+          className="h-2 w-full cursor-pointer appearance-none rounded-full bg-gray-800 accent-blue-500"
         />
       </div>
 
-      <div
-        ref={timelineRef}
-        className="relative mt-4 h-24 overflow-hidden rounded-lg border border-gray-800 bg-gray-900"
-        onMouseDown={(event) => {
-          if (event.target !== event.currentTarget) {
-            return;
-          }
-          handleSeek(event.clientX);
-        }}
-      >
-        <div className="absolute inset-y-0 left-0 w-px bg-red-400" style={{ left: `${totalFrames > 0 ? (currentFrame / totalFrames) * 100 : 0}%` }} />
-        <div data-testid="timeline-scenes" className="flex h-full w-full">
-          {ranges.map((range) => {
-            const isSelected = range.index === currentSceneIndex;
-            const widthPercent = totalFrames > 0 ? (range.frameLength / totalFrames) * 100 : 100;
-            const isTouchDragging = touchDragState?.sceneId === range.scene.id && touchDragState.isDragging;
-            const shiftX =
-              touchDragState && touchDragState.isDragging && touchDragState.sceneId !== range.scene.id
-                ? touchDragState.fromIndex < touchDragState.targetIndex &&
-                  range.index > touchDragState.fromIndex &&
-                  range.index <= touchDragState.targetIndex
-                  ? -touchDragState.dragWidth
-                  : touchDragState.fromIndex > touchDragState.targetIndex &&
-                      range.index >= touchDragState.targetIndex &&
-                      range.index < touchDragState.fromIndex
-                    ? touchDragState.dragWidth
-                    : 0
-                : 0;
-            const translateX = isTouchDragging
-              ? touchDragState.currentX - touchDragState.startX
-              : shiftX;
-
-            return (
-              <button
-                key={range.scene.id}
-                type="button"
-                ref={(element) => {
-                  sceneBarRefs.current[range.scene.id] = element;
-                }}
-                className={`group relative h-full border-r border-gray-950 text-left transition-transform duration-150 ${
-                  isTouchDragging
-                    ? "scale-105 bg-blue-700 opacity-90 shadow-lg z-10"
-                    : "bg-gray-700 hover:bg-gray-600"
-                }`}
-                style={{
-                  width: `${widthPercent}%`,
-                  transform: translateX !== 0 ? `translateX(${translateX}px)` : undefined,
-                }}
-                onMouseDown={(event) => {
-                  event.stopPropagation();
-                  setCurrentScene(range.index);
-                  handleSeek(event.clientX);
-                }}
-                onTouchStart={(event) => {
-                  const target = event.target as HTMLElement;
-                  if (target.closest('[data-resize-handle="true"]')) {
-                    return;
-                  }
-
-                  const touch = event.touches[0];
-                  const rect = event.currentTarget.getBoundingClientRect();
-
-                  setCurrentScene(range.index);
-                  clearTouchDragTimer();
-                  setTouchDragState({
-                    sceneId: range.scene.id,
-                    fromIndex: range.index,
-                    startX: touch.clientX,
-                    startY: touch.clientY,
-                    currentX: touch.clientX,
-                    currentY: touch.clientY,
-                    dragWidth: rect.width,
-                    targetIndex: range.index,
-                    isDragging: false,
-                  });
-
-                  touchDragTimerRef.current = window.setTimeout(() => {
-                    setTouchDragState((currentState) => {
-                      if (!currentState || currentState.sceneId !== range.scene.id) {
-                        return currentState;
-                      }
-
-                      if (
-                        Math.hypot(
-                          currentState.currentX - currentState.startX,
-                          currentState.currentY - currentState.startY,
-                        ) > 10
-                      ) {
-                        return null;
-                      }
-
-                      navigator.vibrate?.(50);
-
-                      return {
-                        ...currentState,
-                        isDragging: true,
-                        targetIndex: getTouchTargetIndex(currentState.currentX, currentState.sceneId),
-                      };
-                    });
-                    touchDragTimerRef.current = null;
-                  }, 300);
-                }}
+      <div className="mt-4 overflow-x-auto rounded-lg border border-gray-800">
+        <div
+          className="grid min-w-max grid-cols-[160px_auto]"
+          style={{ gridTemplateColumns: `${HEADER_WIDTH}px ${timelineWidth}px` }}
+        >
+          <div className="sticky left-0 z-20 flex h-10 items-center border-b border-r border-gray-800 bg-gray-950/95 px-4 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 backdrop-blur">
+            Tracks
+          </div>
+          <div
+            ref={timelineRef}
+            className="relative h-10 border-b border-gray-800 bg-gray-900/80"
+            onMouseDown={(event) => handleSeek(event.clientX)}
+          >
+            {timeMarkers.map((second) => (
+              <div
+                key={second}
+                className="absolute inset-y-0 border-l border-gray-800/80"
+                style={{ left: `${second * PIXELS_PER_SECOND}px` }}
               >
-                <div
-                  className={`flex h-full flex-col justify-between p-3 ${
-                    isSelected ? "ring-2 ring-inset ring-blue-400/70" : ""
-                  }`}
-                >
-                  <span className="truncate text-sm font-medium text-white">{range.scene.name}</span>
-                  <span className="text-xs text-gray-300">{range.scene.duration.toFixed(1)}s</span>
-                </div>
-                <div
-                  data-resize-handle="true"
-                  className="absolute inset-y-0 left-0 w-2 cursor-ew-resize bg-white/0 transition group-hover:bg-white/10"
-                  onMouseDown={(event) => {
-                    event.stopPropagation();
-                    setDragState({
-                      sceneId: range.scene.id,
-                      edge: "left",
-                      startX: event.clientX,
-                      startDuration: range.scene.duration,
-                    });
-                  }}
-                />
-                <div
-                  data-resize-handle="true"
-                  className="absolute inset-y-0 right-0 w-2 cursor-ew-resize bg-white/0 transition group-hover:bg-white/10"
-                  onMouseDown={(event) => {
-                    event.stopPropagation();
-                    setDragState({
-                      sceneId: range.scene.id,
-                      edge: "right",
-                      startX: event.clientX,
-                      startDuration: range.scene.duration,
-                    });
-                  }}
-                />
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => addScene()}
-            className="rounded-md bg-gray-800 px-3 py-2 text-sm font-medium text-white transition hover:bg-gray-700"
-          >
-            Add Scene
-          </button>
-          <button
-            type="button"
-            disabled={!selectedScene || scenes.length <= 1}
-            onClick={() => {
-              if (selectedScene) {
-                removeScene(selectedScene.id);
-              }
-            }}
-            className="rounded-md bg-red-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:bg-gray-800 disabled:text-gray-500"
-          >
-            Remove Scene
-          </button>
-        </div>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-sm text-gray-400">
-            BGM:
-            <input
-              type="file"
-              accept="audio/*,.wav,.mp3,.aac,.ogg,.flac,.m4a"
-              data-testid="bgm-input"
-              onChange={async (event) => {
-                const file = event.target.files?.[0] ?? null;
-                if (file) {
-                  const projectId = useSceneStore.getState().currentProjectId;
-                  if (projectId) {
-                    const formData = new FormData();
-                    formData.append("bgm", file);
-                    try {
-                      await fetch(`/api/projects/${projectId}/bgm`, {
-                        method: "POST",
-                        body: formData,
-                      });
-                    } catch (e) {
-                      console.error("BGM upload failed", e);
-                    }
-                  }
-                  useSceneStore.getState().setBgmFile(file);
-                } else {
-                  useSceneStore.getState().setBgmFile(null);
-                }
-              }}
-              className="text-sm text-gray-400 file:mr-2 file:rounded-md file:border-0 file:bg-gray-800 file:px-3 file:py-1 file:text-sm file:text-white file:cursor-pointer"
+                <span className="absolute left-2 top-2 text-[10px] text-gray-500">
+                  {formatTime(second)}
+                </span>
+              </div>
+            ))}
+            <div
+              className="pointer-events-none absolute inset-y-0 z-10 w-px bg-blue-400"
+              style={{ left: `${Math.min(currentTime, timelineSeconds) * PIXELS_PER_SECOND}px` }}
             />
-          </label>
-        </div>
-        <div className="text-sm text-gray-400">
-          {selectedScene ? `${selectedScene.name} selected` : "No scene selected"}
+          </div>
+
+          {tracks.length === 0 ? (
+            <>
+              <div className="sticky left-0 z-10 flex h-14 items-center border-r bg-gray-950/95 px-4 text-sm text-gray-500 backdrop-blur">
+                No tracks
+              </div>
+              <div className="flex h-14 items-center px-4 text-sm text-gray-500">
+                Add tracks to populate the timeline.
+              </div>
+            </>
+          ) : (
+            tracks.map((track) => (
+              <FragmentRow
+                key={track.id}
+                track={track}
+                timelineWidth={timelineWidth}
+                playheadLeft={Math.min(currentTime, timelineSeconds) * PIXELS_PER_SECOND}
+                onSeek={handleSeek}
+                onToggleMuted={() => updateTrack(track.id, { muted: !track.muted })}
+                onToggleVisible={() => updateTrack(track.id, { visible: !track.visible })}
+              />
+            ))
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+function FragmentRow({
+  track,
+  timelineWidth,
+  playheadLeft,
+  onSeek,
+  onToggleMuted,
+  onToggleVisible,
+}: {
+  track: Track;
+  timelineWidth: number;
+  playheadLeft: number;
+  onSeek: (clientX: number) => void;
+  onToggleMuted: () => void;
+  onToggleVisible: () => void;
+}) {
+  const sortedItems = [...track.items].sort((a, b) => a.startTime - b.startTime);
+
+  return (
+    <>
+      <TrackHeader
+        track={track}
+        onToggleMuted={onToggleMuted}
+        onToggleVisible={onToggleVisible}
+      />
+      <div
+        className="relative border-b border-gray-800 bg-gray-900/40"
+        style={{ height: `${ROW_HEIGHT}px`, width: `${timelineWidth}px` }}
+        onMouseDown={(event) => onSeek(event.clientX)}
+      >
+        {Array.from({ length: Math.ceil(timelineWidth / PIXELS_PER_SECOND) + 1 }, (_, index) => (
+          <div
+            key={index}
+            className="absolute inset-y-0 border-l border-gray-800/50"
+            style={{ left: `${index * PIXELS_PER_SECOND}px` }}
+          />
+        ))}
+        <div
+          className="pointer-events-none absolute inset-y-0 z-10 w-px bg-blue-400"
+          style={{ left: `${playheadLeft}px` }}
+        />
+        {sortedItems.map((item) => (
+          <TrackItemBlock key={item.id} item={item} trackType={track.type} />
+        ))}
+      </div>
+    </>
   );
 }
