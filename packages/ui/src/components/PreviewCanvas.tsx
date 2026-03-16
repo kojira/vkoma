@@ -64,6 +64,10 @@ function PreviewCanvasInner() {
   const audioUrlRef = useRef<string | null>(null);
   const frameAccumulatorRef = useRef(0);
   const lastTimestampRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const liveFFTRef = useRef<number[]>([]);
 
   const scenes = useSceneStore((state) => state.scenes);
   const bgmFile = useSceneStore((state) => state.bgmFile);
@@ -106,16 +110,26 @@ function PreviewCanvasInner() {
 
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     const fftFrame = fftCache?.frames[currentFrame];
-    const sceneForRender = fftFrame
+    const liveFFT = liveFFTRef.current;
+    const hasLiveFFT = liveFFT.length > 0 && isPlaying;
+    const sceneForRender = hasLiveFFT
       ? {
           ...range.scene,
           params: {
             ...range.scene.params,
-            fftBands: fftFrame.bands,
-            beatIntensity: fftFrame.beatIntensity,
+            fftBands: liveFFT,
           },
         }
-      : range.scene;
+      : fftFrame
+        ? {
+            ...range.scene,
+            params: {
+              ...range.scene.params,
+              fftBands: fftFrame.bands,
+              beatIntensity: fftFrame.beatIntensity,
+            },
+          }
+        : range.scene;
     renderScene(sceneForRender, ctx, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
 
     if (bgImagePath) {
@@ -152,7 +166,7 @@ function PreviewCanvasInner() {
         }
       }
     }
-  }, [currentFrame, currentSceneIndex, fftCache, fps, scenes, setCurrentScene]);
+  }, [currentFrame, currentSceneIndex, fftCache, fps, isPlaying, scenes, setCurrentScene]);
 
   useEffect(() => {
     if (!audioRef.current) {
@@ -196,6 +210,13 @@ function PreviewCanvasInner() {
         URL.revokeObjectURL(audioUrlRef.current);
         audioUrlRef.current = null;
       }
+
+      if (audioContextRef.current) {
+        void audioContextRef.current.close();
+        audioContextRef.current = null;
+        analyserRef.current = null;
+        sourceRef.current = null;
+      }
     };
   }, []);
 
@@ -221,6 +242,21 @@ function PreviewCanvasInner() {
     }
 
     if (isPlaying) {
+      // Initialize AudioContext on user-initiated play (autoplay policy)
+      if (!audioContextRef.current) {
+        const ctx = new AudioContext();
+        audioContextRef.current = ctx;
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 128;
+        analyserRef.current = analyser;
+        const source = ctx.createMediaElementSource(audio);
+        source.connect(analyser);
+        analyser.connect(ctx.destination);
+        sourceRef.current = source;
+      }
+      if (audioContextRef.current.state === "suspended") {
+        void audioContextRef.current.resume();
+      }
       void audio.play().catch(() => {});
       return;
     }
@@ -254,6 +290,18 @@ function PreviewCanvasInner() {
       const delta = timestamp - lastTimestampRef.current;
       lastTimestampRef.current = timestamp;
       frameAccumulatorRef.current += delta;
+
+      // Read live FFT data each frame
+      if (analyserRef.current) {
+        const analyser = analyserRef.current;
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(dataArray);
+        const bands: number[] = [];
+        for (let i = 0; i < dataArray.length; i++) {
+          bands.push(dataArray[i] / 255);
+        }
+        liveFFTRef.current = bands;
+      }
 
       if (frameAccumulatorRef.current >= step) {
         const framesToAdvance = Math.floor(frameAccumulatorRef.current / step);
