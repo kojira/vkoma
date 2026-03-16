@@ -117,7 +117,8 @@ function PreviewCanvasInner() {
           ...range.scene,
           params: {
             ...range.scene.params,
-            fftBands: liveFFT,
+            fftBands: JSON.stringify(liveFFT),
+            beatIntensity: 0,
           },
         }
       : fftFrame
@@ -125,7 +126,7 @@ function PreviewCanvasInner() {
             ...range.scene,
             params: {
               ...range.scene.params,
-              fftBands: fftFrame.bands,
+              fftBands: JSON.stringify(fftFrame.bands),
               beatIntensity: fftFrame.beatIntensity,
             },
           }
