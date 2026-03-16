@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { serve } from "@hono/node-server";
 import { spawn } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
@@ -25,6 +26,7 @@ import {
 import type { Track } from "../../core/src/timeline";
 import { analyzeAudio } from "./audio-analyze.js";
 import { createAudioAnalyzer } from '../../audio/src/index.js';
+import { handleAiChat } from "./ai-chat.js";
 import { renderFrameWithTracks } from "./render-frame.js";
 import { WorkerPool } from "./workerPool.js";
 
@@ -62,6 +64,7 @@ interface SavedSceneItem {
 }
 
 const app = new Hono();
+handleAiChat(app);
 let projectsRoot = process.env.VKOMA_PROJECTS_DIR ?? path.join(os.homedir(), "vkoma-projects");
 const CONFIG_FILE = path.join(os.homedir(), ".vkoma-config.json");
 const MV_ASSETS_DIR = "/Volumes/2TB/openclaw/workspace/projects/vkoma/mv-assets";
@@ -596,6 +599,7 @@ app.put("/api/projects/:id", async (c) => {
   return c.json({ project });
 });
 
+// Deprecated: retained for backward compatibility with the legacy one-shot Claude CLI flow.
 app.post("/api/ai/generate", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const userPrompt = typeof body.prompt === "string" ? body.prompt : "";
