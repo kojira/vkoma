@@ -83,13 +83,21 @@ function createInitialScenes(): SceneItem[] {
 }
 
 function serializeScenes(scenes: SceneItem[]): SavedSceneItem[] {
-  return scenes.map((scene) => ({
-    id: scene.id,
-    name: scene.name,
-    duration: scene.duration,
-    params: scene.params,
-    sceneConfigId: scene.sceneConfig.id,
-  }));
+  return scenes.map((scene) => {
+    const base = {
+      id: scene.id,
+      name: scene.name,
+      duration: scene.duration,
+      params: scene.params,
+      sceneConfigId: scene.sceneConfig.id,
+    };
+    // renderCodeがあれば（AIで生成したdynamicシーン）保存する
+    const rc = (scene as any).renderCode ?? (scene.sceneConfig as any)?.renderCode;
+    if (rc && typeof rc === "string") {
+      return { ...base, renderCode: rc };
+    }
+    return base;
+  });
 }
 
 function deserializeScenes(rawScenes: unknown): SceneItem[] {

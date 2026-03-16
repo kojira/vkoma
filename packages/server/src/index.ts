@@ -106,7 +106,7 @@ async function writeProject(project: Project) {
 function deserializeServerScenes(rawScenes: unknown): SceneItem[] {
   if (!Array.isArray(rawScenes)) return [];
 
-  return rawScenes
+  const result = rawScenes
     .map<SceneItem | null>((scene, index) => {
       if (!scene || typeof scene !== "object") return null;
 
@@ -147,7 +147,12 @@ function deserializeServerScenes(rawScenes: unknown): SceneItem[] {
         }
       }
 
-      if (!preset) return null;
+      if (!preset) {
+        console.error(
+          `[deserialize] scene[${index}] no preset found for sceneConfigId="${sceneConfigId}", renderCode=${saved.renderCode ? "present" : "missing"}`,
+        );
+        return null;
+      }
 
       return {
         id:
@@ -166,6 +171,12 @@ function deserializeServerScenes(rawScenes: unknown): SceneItem[] {
       };
     })
     .filter((scene): scene is SceneItem => scene !== null);
+
+  if (result.length === 0 && rawScenes.length > 0) {
+    console.error("[deserialize] all scenes failed to parse:", JSON.stringify(rawScenes).slice(0, 500));
+  }
+
+  return result;
 }
 
 const __filename_esm = fileURLToPath(import.meta.url);
