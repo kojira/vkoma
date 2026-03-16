@@ -452,3 +452,6 @@ export const useSceneStore = create<SceneStore>()(
     },
   ),
 );
+
+// 後方互換: sceneStore → timelineStore へのシム
+export { useTimelineStore } from "./timelineStore";
