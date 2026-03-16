@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { spawn } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
+import fs from "node:fs";
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -61,8 +62,20 @@ interface SavedSceneItem {
 }
 
 const app = new Hono();
-const projectsRoot = process.env.VKOMA_PROJECTS_DIR ?? path.join(os.homedir(), "vkoma-projects");
+let projectsRoot = process.env.VKOMA_PROJECTS_DIR ?? path.join(os.homedir(), "vkoma-projects");
+const CONFIG_FILE = path.join(os.homedir(), ".vkoma-config.json");
 const MV_ASSETS_DIR = "/Volumes/2TB/openclaw/workspace/projects/vkoma/mv-assets";
+
+// Load persisted config
+try {
+  const configRaw = fs.readFileSync(CONFIG_FILE, "utf8");
+  const config = JSON.parse(configRaw) as { projectsDir?: string };
+  if (typeof config.projectsDir === "string" && config.projectsDir.length > 0) {
+    projectsRoot = config.projectsDir;
+  }
+} catch {
+  // No config file yet, use default
+}
 
 app.get("/api/mv-assets/:filename", async (c) => {
   const filename = c.req.param("filename");
@@ -1141,6 +1154,22 @@ app.get("/api/projects/:id/assets/:assetId/file", async (c) => {
   } catch (err) {
     return c.json({ error: String(err) }, 500);
   }
+});
+
+app.get("/api/settings", (c) => {
+  return c.json({ projectsDir: projectsRoot });
+});
+
+app.post("/api/settings", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const newDir = typeof body.projectsDir === "string" ? body.projectsDir.trim() : "";
+  if (!newDir) {
+    return c.json({ error: "projectsDir is required" }, 400);
+  }
+  fs.mkdirSync(newDir, { recursive: true });
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify({ projectsDir: newDir }, null, 2), "utf8");
+  projectsRoot = newDir;
+  return c.json({ ok: true, projectsDir: projectsRoot });
 });
 
 const port = 3001;
