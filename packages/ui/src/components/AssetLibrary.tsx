@@ -93,16 +93,6 @@ function getAcceptForTab(tab: TabType): string {
   }
 }
 
-function supportsRecording(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof navigator !== "undefined" &&
-    "mediaDevices" in navigator &&
-    typeof navigator.mediaDevices?.getUserMedia === "function" &&
-    typeof MediaRecorder !== "undefined"
-  );
-}
-
 export function AssetLibrary() {
   const projectId = useSceneStore((s) => s.currentProjectId);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -114,11 +104,7 @@ export function AssetLibrary() {
   const [showUrlForm, setShowUrlForm] = useState(false);
   const [urlInput, setUrlInput] = useState("");
   const [fetchingUrl, setFetchingUrl] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [recordingSupported, setRecordingSupported] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     if (!projectId) {
@@ -131,23 +117,6 @@ export function AssetLibrary() {
       .then((data: { assets?: Asset[] }) => setAssets(data.assets ?? []))
       .catch(() => setAssets([]));
   }, [projectId]);
-
-  useEffect(() => {
-    setRecordingSupported(supportsRecording());
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      const recorder = mediaRecorderRef.current;
-      if (recorder && recorder.state !== "inactive") {
-        recorder.ondataavailable = null;
-        recorder.onerror = null;
-        recorder.onstop = null;
-        recorder.stop();
-      }
-      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-    };
-  }, []);
 
   const appendAsset = useCallback((asset: Asset | undefined) => {
     if (!asset) {
@@ -264,91 +233,6 @@ export function AssetLibrary() {
     }
   }, [appendAsset, projectId, urlInput]);
 
-  const stopRecording = useCallback(() => {
-    const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== "inactive") {
-      recorder.stop();
-    }
-  }, []);
-
-  const startRecording = useCallback(async () => {
-    if (!projectId) {
-      return;
-    }
-    if (!recordingSupported) {
-      setUploadError("このブラウザでは録音に対応していません");
-      return;
-    }
-
-    setUploadError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-
-      const mimeType = MediaRecorder.isTypeSupported("audio/mp4")
-        ? "audio/mp4"
-        : MediaRecorder.isTypeSupported("audio/webm")
-          ? "audio/webm"
-          : "";
-      const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
-      const chunks: Blob[] = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunks.push(event.data);
-        }
-      };
-      recorder.onerror = () => {
-        setUploadError("録音中にエラーが発生しました");
-      };
-      recorder.onstop = async () => {
-        setRecording(false);
-        mediaRecorderRef.current = null;
-        mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-        mediaStreamRef.current = null;
-
-        if (chunks.length === 0) {
-          setUploadError("録音データを取得できませんでした");
-          return;
-        }
-
-        const actualMimeType = recorder.mimeType || mimeType || "audio/webm";
-        const extension = actualMimeType.includes("mp4") ? "mp4" : "webm";
-        const file = new File(chunks, `recording_${Date.now()}.${extension}`, {
-          type: actualMimeType,
-        });
-
-        setUploading(true);
-        try {
-          await uploadAsset(file);
-        } catch (error) {
-          setUploadError(
-            error instanceof Error
-              ? error.message
-              : "録音ファイルのアップロードに失敗しました"
-          );
-        } finally {
-          setUploading(false);
-        }
-      };
-
-      mediaRecorderRef.current = recorder;
-      recorder.start();
-      setRecording(true);
-    } catch (error) {
-      const message =
-        error instanceof DOMException && error.name === "NotAllowedError"
-          ? "マイクの権限がありません"
-          : "録音を開始できませんでした";
-      setUploadError(message);
-      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-      mediaStreamRef.current = null;
-      setRecording(false);
-    }
-  }, [projectId, recordingSupported, uploadAsset]);
-
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
@@ -366,7 +250,6 @@ export function AssetLibrary() {
     { key: "audio", label: "音声" },
     { key: "video", label: "動画" },
   ];
-  const showRecordingButton = activeTab === "all" || activeTab === "audio";
 
   return (
     <div className="flex w-full flex-col gap-2 rounded-lg bg-gray-800 p-3 lg:w-60">
@@ -376,7 +259,7 @@ export function AssetLibrary() {
           <div className="flex items-center gap-1">
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={!projectId || uploading || recording}
+              disabled={!projectId || uploading}
               className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white hover:bg-blue-500 disabled:opacity-50"
             >
               {uploading ? "…" : "+ 追加"}
@@ -387,34 +270,11 @@ export function AssetLibrary() {
                 setShowUrlForm((prev) => !prev);
                 setUploadError(null);
               }}
-              disabled={!projectId || fetchingUrl || recording}
+              disabled={!projectId || fetchingUrl}
               className="rounded bg-sky-700 px-2 py-0.5 text-xs text-white hover:bg-sky-600 disabled:opacity-50"
             >
               🌐 URL
             </button>
-            {showRecordingButton ? (
-              recording ? (
-                <button
-                  type="button"
-                  onClick={stopRecording}
-                  disabled={!projectId || uploading}
-                  className="rounded bg-red-600 px-2 py-0.5 text-xs text-white hover:bg-red-500 disabled:opacity-50"
-                >
-                  ⏹ 停止
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void startRecording();
-                  }}
-                  disabled={!projectId || uploading || fetchingUrl}
-                  className="rounded bg-emerald-700 px-2 py-0.5 text-xs text-white hover:bg-emerald-600 disabled:opacity-50"
-                >
-                  🎤 録音
-                </button>
-              )
-            ) : null}
           </div>
           <input
             ref={fileInputRef}
