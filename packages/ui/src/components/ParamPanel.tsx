@@ -10,14 +10,14 @@ export function ParamPanel() {
 
   if (!scene) {
     return (
-      <aside className="hidden w-72 shrink-0 rounded-xl border border-gray-800 bg-gray-950 p-4 lg:block">
+      <aside className="w-full shrink-0 rounded-xl border border-gray-800 bg-gray-950 p-4 lg:w-72">
         <div className="text-sm text-gray-400">No scene selected.</div>
       </aside>
     );
   }
 
   return (
-    <aside className="hidden w-72 shrink-0 rounded-xl border border-gray-800 bg-gray-950 p-4 lg:block">
+    <aside className="w-full shrink-0 rounded-xl border border-gray-800 bg-gray-950 p-4 lg:w-72">
       <div className="border-b border-gray-800 pb-4">
         <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-gray-300">
           Parameters

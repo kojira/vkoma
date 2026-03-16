@@ -133,7 +133,7 @@ export function AssetLibrary() {
   ];
 
   return (
-    <div className="flex w-60 flex-col gap-2 rounded-lg bg-gray-800 p-3">
+    <div className="flex w-full flex-col gap-2 rounded-lg bg-gray-800 p-3 lg:w-60">
       {/* Header */}
       <div className="flex items-center justify-between">
         <span className="text-sm font-semibold text-white">📁 アセット</span>
