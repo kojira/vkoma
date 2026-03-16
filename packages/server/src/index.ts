@@ -578,6 +578,18 @@ app.put("/api/projects/:id", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   project.name = body.name ?? project.name;
   project.scenes = Array.isArray(body.scenes) ? body.scenes : project.scenes;
+  if (body.timeline && typeof body.timeline === "object") {
+    project.timeline = body.timeline;
+  } else if (Array.isArray(body.tracks)) {
+    const tracks = body.tracks as Track[];
+    const duration = tracks.reduce((max, track) => {
+      const trackEnd = track.items.reduce((itemMax, item) => {
+        return Math.max(itemMax, item.startTime + item.duration);
+      }, 0);
+      return Math.max(max, trackEnd);
+    }, 0);
+    project.timeline = { duration, tracks };
+  }
   project.updatedAt = new Date().toISOString();
 
   await writeProject(project);
@@ -587,6 +599,8 @@ app.put("/api/projects/:id", async (c) => {
 app.post("/api/ai/generate", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const userPrompt = typeof body.prompt === "string" ? body.prompt : "";
+  const requestAssets = Array.isArray(body.assets) ? body.assets : [];
+  const projectIdForAssets = typeof body.projectId === "string" ? body.projectId : "";
 
   const systemPrompt = `You are a video scene generator for vKoma. Generate scenes as a JSON array.
 Each scene must have these fields:
@@ -611,6 +625,16 @@ Available preset params:
 Optionally, you may include a "renderCode" field with a JavaScript function body (parameters: ctx, params, time) to define a fully custom draw function. When renderCode is provided, the code field can be any unique id. The function body has access to the Canvas 2D context (ctx), the params object, and time in seconds.
 
 When generating scenes for "IrisOut" or "IRIS OUT" band music videos, use: gradient backgrounds + typography with "IRIS OUT" text + particles + geometric shapes (circles, triangles, lines).
+
+You may also include an "audioTracks" array in your response to add audio assets to audio tracks.
+Each audio track object should have:
+- assetId: the asset ID from the available assets list
+- name: display name (optional)
+- startTime: start time in seconds (optional, default 0)
+- duration: duration in seconds (optional, defaults to total video duration)
+- volume: volume 0.0-1.0 (optional, default 1.0)
+
+Example response with audio: {"scenes": [...], "audioTracks": [{"assetId": "abc-123", "startTime": 0, "volume": 0.8}]}
 
 Respond with ONLY a JSON object: {"scenes": [...]}
 `;
@@ -648,11 +672,15 @@ Respond with ONLY a JSON object: {"scenes": [...]}
 
       const claudePath = process.env.CLAUDE_PATH || "/Users/kojira/.local/bin/claude";
       const startTime = Date.now();
+      let enrichedPrompt = userPrompt;
+      if (projectIdForAssets && requestAssets.length > 0) {
+        enrichedPrompt += "\n\n利用可能なアセット一覧:\n" + JSON.stringify(requestAssets, null, 2);
+      }
       const child = spawn(
         claudePath,
         [
           "--system-prompt", effectiveSystemPrompt,
-          "-p", userPrompt,
+          "-p", enrichedPrompt,
           "--output-format", "text",
         ],
         {

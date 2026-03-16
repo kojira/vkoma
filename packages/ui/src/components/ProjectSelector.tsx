@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSceneStore } from "../stores/sceneStore";
+import { useTimelineStore } from "../stores/timelineStore";
 
 interface ProjectSummary {
   id: string;
@@ -65,6 +66,10 @@ export function ProjectSelector() {
     }
 
     await createProject(name.trim());
+    const projectId = useSceneStore.getState().currentProjectId;
+    if (projectId) {
+      await useTimelineStore.getState().loadProject(projectId);
+    }
   };
 
   return (
@@ -99,7 +104,12 @@ export function ProjectSelector() {
                 <button
                   key={project.id}
                   type="button"
-                  onClick={() => void loadProject(project.id)}
+                  onClick={() =>
+                    void Promise.all([
+                      loadProject(project.id),
+                      useTimelineStore.getState().loadProject(project.id),
+                    ])
+                  }
                   className="flex w-full items-center justify-between rounded-xl border border-gray-800 bg-gray-950 px-5 py-4 text-left transition hover:border-blue-400 hover:bg-gray-900"
                 >
                   <span>

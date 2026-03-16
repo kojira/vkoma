@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useSceneStore, allScenePresets } from "../stores/sceneStore";
+import { useTimelineStore } from "../stores/timelineStore";
 import { useChatStore } from "../stores/chatStore";
 import { defineScene, params as sceneParams, type SceneParam } from "../../../../packages/core/src/index";
 
@@ -12,10 +13,18 @@ type GeneratedScene = {
   renderCode?: string;
 };
 
+type AudioTrackRequest = {
+  assetId: string;
+  name?: string;
+  startTime?: number;
+  duration?: number;
+  volume?: number;
+};
+
 type SSEEvent =
   | { type: "chunk"; chunk: string }
   | { type: "heartbeat"; elapsed: number }
-  | { scenes: GeneratedScene[]; done: true }
+  | { scenes: GeneratedScene[]; audioTracks?: AudioTrackRequest[]; done: true }
   | { error: string; done: true }
   | { chunk: string; type?: undefined };
 
@@ -47,12 +56,24 @@ export function ChatPanel() {
     addMessage({ id: streamingMsgId, role: "assistant", content: "生成中..." });
 
     try {
+      const projectId =
+        useTimelineStore.getState().projectId ?? useSceneStore.getState().currentProjectId;
+      const assets = useTimelineStore.getState().assets;
+      const assetInfo = assets.map((asset) => ({
+        id: asset.id,
+        name: asset.name,
+        type: asset.type,
+        filename: asset.filename,
+        mimeType: asset.mimeType,
+      }));
+
       const response = await fetch("/api/ai/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          projectId: useSceneStore.getState().currentProjectId,
+          projectId,
           prompt: value,
+          assets: assetInfo,
         }),
       });
 
@@ -64,7 +85,7 @@ export function ChatPanel() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let totalBytes = 0;
+      let accumulatedText = "";
 
       for (;;) {
         const { done: readerDone, value: chunk } = await reader.read();
@@ -88,12 +109,18 @@ export function ChatPanel() {
             ("type" in event && event.type === "chunk") ||
             ("chunk" in event && typeof event.chunk === "string")
           ) {
-            totalBytes += event.chunk.length;
-            updateMessage(streamingMsgId, `生成中... (${totalBytes}バイト受信)`);
+            accumulatedText += event.chunk;
+            const displayText =
+              accumulatedText.length > 200
+                ? `...${accumulatedText.slice(-200)}`
+                : accumulatedText;
+            updateMessage(streamingMsgId, `🤖 AI出力中...\n\`\`\`\n${displayText}\n\`\`\``);
           }
 
           if ("type" in event && event.type === "heartbeat") {
-            updateMessage(streamingMsgId, `生成中... (${event.elapsed}秒経過)`);
+            if (!accumulatedText) {
+              updateMessage(streamingMsgId, `生成中... (${event.elapsed}秒経過)`);
+            }
           }
 
           if ("done" in event && event.done) {
@@ -103,15 +130,57 @@ export function ChatPanel() {
             }
 
             const scenes = event.scenes ?? [];
+            const audioTracks = event.audioTracks ?? [];
+            const timelineStore = useTimelineStore.getState();
+
+            let videoTrack = timelineStore.tracks.find((track) => track.type === "video");
+            if (!videoTrack) {
+              timelineStore.addTrack("video", "映像");
+              videoTrack = useTimelineStore.getState().tracks.find((track) => track.type === "video");
+            }
+
+            let nextStartTime = videoTrack?.items.reduce((max, item) => {
+              return Math.max(max, item.startTime + item.duration);
+            }, 0) ?? 0;
+
+            if (videoTrack) {
+              for (const scene of scenes) {
+                const duration = scene.duration ?? 3;
+                const sceneConfigId =
+                  scene.code ?? `dynamic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                useTimelineStore.getState().addItem(videoTrack.id, {
+                  startTime: nextStartTime,
+                  duration,
+                  sceneConfigId,
+                  params: scene.params ?? {},
+                  renderCode: scene.renderCode,
+                });
+                nextStartTime += duration;
+              }
+            }
+
+            for (const trackRequest of audioTracks) {
+              let audioTrack = useTimelineStore.getState().tracks.find((track) => track.type === "audio");
+              if (!audioTrack) {
+                useTimelineStore.getState().addTrack("audio", "オーディオ");
+                audioTrack = useTimelineStore.getState().tracks.find((track) => track.type === "audio");
+              }
+
+              if (!audioTrack) {
+                continue;
+              }
+
+              useTimelineStore.getState().addItem(audioTrack.id, {
+                startTime: trackRequest.startTime ?? 0,
+                duration: trackRequest.duration ?? nextStartTime,
+                assetId: trackRequest.assetId,
+                params: { volume: trackRequest.volume ?? 1.0 },
+              });
+            }
+
             const addScene = useSceneStore.getState().addScene;
 
-            function resolveSceneConfig(scene: {
-              code?: string;
-              renderCode?: string;
-              name?: string;
-              duration?: number;
-              params?: Record<string, unknown>;
-            }) {
+            function resolveSceneConfig(scene: GeneratedScene) {
               if (scene.code) {
                 const preset = allScenePresets.find((p) => p.id === scene.code);
                 if (preset) return preset;
@@ -149,7 +218,6 @@ export function ChatPanel() {
               return undefined;
             }
 
-            // Clear existing scenes first, then add generated ones
             const store = useSceneStore.getState();
             if (scenes.length > 0) {
               for (const s of store.scenes.slice(1)) {
@@ -177,7 +245,19 @@ export function ChatPanel() {
               }
             }
 
-            updateMessage(streamingMsgId, `✅ ${scenes.length}シーンを生成しました`);
+            try {
+              await useTimelineStore.getState().saveProject();
+            } catch (error) {
+              console.error("Failed to save timeline:", error);
+            }
+            try {
+              await useSceneStore.getState().saveProject();
+            } catch (error) {
+              console.error("Failed to save scenes:", error);
+            }
+
+            const audioInfo = audioTracks.length > 0 ? ` + ${audioTracks.length}オーディオトラック` : "";
+            updateMessage(streamingMsgId, `✅ ${scenes.length}シーンを生成しました${audioInfo}`);
           }
         }
       }
@@ -210,18 +290,18 @@ export function ChatPanel() {
                   : "max-w-[85%] rounded-2xl rounded-bl-sm bg-gray-800 px-3 py-2 text-sm text-gray-100"
             }
           >
-            {message.content.startsWith("生成中...") ? (
+            {message.content.startsWith("生成中...") || message.content.startsWith("🤖 AI出力中...") ? (
               <span className="flex items-center gap-2">
-                <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                <svg className="h-3.5 w-3.5 animate-spin flex-shrink-0" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                {message.content}
+                <span className="whitespace-pre-wrap break-all">{message.content}</span>
               </span>
             ) : message.content.startsWith("Error:") ? (
               <span className="flex items-center gap-1.5">⚠️ {message.content}</span>
             ) : (
-              message.content
+              <span className="whitespace-pre-wrap">{message.content}</span>
             )}
           </div>
         ))}

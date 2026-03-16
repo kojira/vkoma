@@ -8,6 +8,7 @@ import { ProjectSelector } from "./components/ProjectSelector";
 import { SettingsModal } from "./components/SettingsModal";
 import { Timeline } from "./components/Timeline";
 import { useSceneStore } from "./stores/sceneStore";
+import { useTimelineStore } from "./stores/timelineStore";
 
 export default function App() {
   const currentProjectId = useSceneStore((state) => state.currentProjectId);
@@ -31,7 +32,10 @@ export default function App() {
       return;
     }
 
-    loadProject(projectIdToLoad).catch(() => {
+    Promise.all([
+      loadProject(projectIdToLoad),
+      useTimelineStore.getState().loadProject(projectIdToLoad),
+    ]).catch(() => {
       clearProject();
     });
   }, [clearProject, loadProject]);
