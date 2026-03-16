@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { AssetLibrary } from "./components/AssetLibrary";
 import { ChatPanel } from "./components/ChatPanel";
 import { Header } from "./components/Header";
 import { ParamPanel } from "./components/ParamPanel";
@@ -40,7 +41,10 @@ export default function App() {
     <div className="min-h-screen bg-gray-900 text-white">
       <Header />
       <main className="flex flex-col gap-4 p-4 lg:flex-row">
-        <div className="hidden lg:block"><ParamPanel /></div>
+        <div className="hidden lg:flex lg:flex-col lg:gap-4">
+          <ParamPanel />
+          <AssetLibrary />
+        </div>
         <section className="flex min-w-0 flex-1 flex-col gap-4">
           <PreviewCanvas />
           <Timeline />
