@@ -1,0 +1,15 @@
+
+> @vkoma/server@0.1.0 test /Volumes/2TB/openclaw/workspace/projects/vkoma/packages/server
+> vitest run -- --reporter=json
+
+
+ RUN  v3.2.4 /Volumes/2TB/openclaw/workspace/projects/vkoma/packages/server
+
+ ✓ src/__tests__/bg-image-rendering.test.ts (7 tests) 3ms
+ ✓ src/__tests__/renderer-v2.test.ts (3 tests) 2ms
+
+ Test Files  2 passed (2)
+      Tests  10 passed (10)
+   Start at  18:02:50
+   Duration  252ms (transform 46ms, setup 0ms, collect 62ms, tests 5ms, environment 0ms, prepare 78ms)
+

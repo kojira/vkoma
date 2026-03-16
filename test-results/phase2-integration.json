@@ -1,0 +1,39 @@
+
+> @vkoma/core@0.1.0 test /Volumes/2TB/openclaw/workspace/projects/vkoma/packages/core
+> vitest run -- --reporter=json
+
+
+ RUN  v3.2.4 /Volumes/2TB/openclaw/workspace/projects/vkoma/packages/core
+
+ ✓ src/__tests__/asset.test.ts (16 tests) 3ms
+ ✓ src/utils/__tests__/textUtils.test.js (4 tests) 4ms
+ ✓ src/__tests__/asset.test.js (16 tests) 4ms
+ ✓ src/__tests__/parts/transition-effects.test.js (6 tests) 7ms
+ ✓ src/__tests__/parts/transition-effects.test.ts (6 tests) 7ms
+ ✓ src/__tests__/parts/ShapePart.test.ts (9 tests) 7ms
+ ✓ src/__tests__/parts/TextPart.test.ts (10 tests) 9ms
+ ✓ src/__tests__/parts/TextPart.test.js (10 tests) 5ms
+ ✓ src/__tests__/params.test.js (13 tests) 4ms
+ ✓ src/utils/__tests__/random.test.js (5 tests) 4ms
+ ✓ src/utils/__tests__/random.test.ts (5 tests) 12ms
+ ✓ src/utils/__tests__/transition.test.ts (3 tests) 27ms
+ ✓ src/utils/__tests__/interpolate.test.js (8 tests) 3ms
+ ✓ src/__tests__/migration.test.ts (3 tests) 3ms
+ ✓ src/__tests__/parts/ShapePart.test.js (9 tests) 7ms
+ ✓ src/utils/__tests__/spring.test.ts (4 tests) 4ms
+ ✓ src/utils/__tests__/colors.test.js (8 tests) 4ms
+ ✓ src/__tests__/timeline.test.js (3 tests) 4ms
+ ✓ src/utils/__tests__/transition.test.js (3 tests) 5ms
+ ✓ src/utils/__tests__/textUtils.test.ts (4 tests) 3ms
+ ✓ src/__tests__/params.test.ts (13 tests) 4ms
+ ✓ src/utils/__tests__/interpolate.test.ts (8 tests) 2ms
+ ✓ src/__tests__/timeline.test.ts (3 tests) 2ms
+ ✓ src/utils/__tests__/colors.test.ts (8 tests) 4ms
+ ✓ src/utils/__tests__/spring.test.js (4 tests) 3ms
+ ✓ src/__tests__/migration.test.js (3 tests) 3ms
+
+ Test Files  26 passed (26)
+      Tests  184 passed (184)
+   Start at  18:02:51
+   Duration  1.03s (transform 283ms, setup 0ms, collect 664ms, tests 145ms, environment 7ms, prepare 2.08s)
+

@@ -1,0 +1,22 @@
+
+> @vkoma/core@0.1.0 test /Volumes/2TB/openclaw/workspace/projects/vkoma/packages/core
+> vitest run -- --reporter=json
+
+
+ RUN  v3.2.4 /Volumes/2TB/openclaw/workspace/projects/vkoma/packages/core
+
+ ✓ src/utils/__tests__/interpolate.test.ts (8 tests) 3ms
+ ✓ src/utils/__tests__/spring.test.ts (4 tests) 4ms
+ ✓ src/utils/__tests__/transition.test.ts (3 tests) 5ms
+ ✓ src/__tests__/params.test.ts (13 tests) 4ms
+ ✓ src/__tests__/parts/TextPart.test.ts (10 tests) 6ms
+ ✓ src/utils/__tests__/random.test.ts (5 tests) 4ms
+ ✓ src/utils/__tests__/colors.test.ts (8 tests) 2ms
+ ✓ src/__tests__/parts/ShapePart.test.ts (9 tests) 7ms
+ ✓ src/utils/__tests__/textUtils.test.ts (4 tests) 5ms
+
+ Test Files  9 passed (9)
+      Tests  64 passed (64)
+   Start at  16:50:39
+   Duration  393ms (transform 250ms, setup 0ms, collect 407ms, tests 41ms, environment 1ms, prepare 779ms)
+
