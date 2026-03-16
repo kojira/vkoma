@@ -1,6 +1,6 @@
-import { useCallback, useRef, useState } from "react";
-import { useTimelineStore } from "../stores/timelineStore";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Asset, AssetType } from "../../../../packages/core/src/asset";
+import { useSceneStore } from "../stores/sceneStore";
 
 type TabType = "all" | AssetType;
 
@@ -81,16 +81,57 @@ function AssetCard({ asset, onRemove }: { asset: Asset; onRemove: (id: string) =
 }
 
 export function AssetLibrary() {
-  const assets = useTimelineStore((s) => s.assets);
-  const uploadAsset = useTimelineStore((s) => s.uploadAsset);
-  const removeAsset = useTimelineStore((s) => s.removeAsset);
-  const projectId = useTimelineStore((s) => s.projectId);
+  const projectId = useSceneStore((s) => s.currentProjectId);
+  const [assets, setAssets] = useState<Asset[]>([]);
 
   const [activeTab, setActiveTab] = useState<TabType>("all");
   const [search, setSearch] = useState("");
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!projectId) {
+      setAssets([]);
+      return;
+    }
+
+    fetch(`/api/projects/${projectId}/assets`)
+      .then((r) => r.json())
+      .then((data: { assets?: Asset[] }) => setAssets(data.assets ?? []))
+      .catch(() => setAssets([]));
+  }, [projectId]);
+
+  const uploadAsset = useCallback(
+    async (file: File) => {
+      if (!projectId) return;
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch(`/api/projects/${projectId}/assets`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) throw new Error("Failed to upload asset");
+
+      const data = (await res.json()) as { asset?: Asset };
+      if (data.asset) setAssets((prev) => [...prev, data.asset as Asset]);
+    },
+    [projectId]
+  );
+
+  const removeAsset = useCallback(
+    async (assetId: string) => {
+      if (!projectId) return;
+
+      await fetch(`/api/projects/${projectId}/assets/${assetId}`, {
+        method: "DELETE",
+      });
+      setAssets((prev) => prev.filter((a) => a.id !== assetId));
+    },
+    [projectId]
+  );
 
   const filteredAssets = assets.filter((a) => {
     const matchesTab = activeTab === "all" || a.type === activeTab;
