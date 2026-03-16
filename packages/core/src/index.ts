@@ -264,3 +264,17 @@ export function applyBeatEffect(
     ctx.restore();
   }
 }
+
+// Extended params system
+export { sceneParams, applyEasing } from './params';
+export type { EasingType, ExtendedParamType, SceneParamExtended, SelectOption } from './params';
+
+// Built-in parts
+export { drawTextPart, textPartDefaultParams } from './parts/TextPart';
+export { drawImagePart, imagePartDefaultParams } from './parts/ImagePart';
+export { drawShapePart, shapePartDefaultParams } from './parts/ShapePart';
+export { drawBackgroundPart, backgroundPartDefaultParams } from './parts/BackgroundPart';
+export type { TextPartParams, TextEffect } from './parts/TextPart';
+export type { ImagePartParams, ImageEffect, ImageFit } from './parts/ImagePart';
+export type { ShapePartParams, ShapeType, ShapeEffect } from './parts/ShapePart';
+export type { BackgroundPartParams, BackgroundType } from './parts/BackgroundPart';
