@@ -651,7 +651,6 @@ Respond with ONLY a JSON object: {"scenes": [...]}
 
       const claudePath = process.env.CLAUDE_PATH || "/Users/kojira/.local/bin/claude";
       const child = spawn(claudePath, ["-p", fullPrompt, "--output-format", "json"], {
-        timeout: 120_000,
         stdio: ["pipe", "pipe", "pipe"],
       });
 
@@ -670,7 +669,11 @@ Respond with ONLY a JSON object: {"scenes": [...]}
 
       child.on("close", (code) => {
         if (code !== 0) {
-          send({ error: stderr || `claude exited with code ${code}`, done: true });
+          const error =
+            code === 143
+              ? "claude process was killed (possibly timed out or out of memory)"
+              : stderr || `claude exited with code ${code}`;
+          send({ error, done: true });
           closeController();
           return;
         }
