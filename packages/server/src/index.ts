@@ -61,7 +61,7 @@ interface SavedSceneItem {
 }
 
 const app = new Hono();
-const projectsRoot = path.join(os.homedir(), "vkoma-projects");
+const projectsRoot = process.env.VKOMA_PROJECTS_DIR ?? path.join(os.homedir(), "vkoma-projects");
 const MV_ASSETS_DIR = "/Volumes/2TB/openclaw/workspace/projects/vkoma/mv-assets";
 
 app.get("/api/mv-assets/:filename", async (c) => {

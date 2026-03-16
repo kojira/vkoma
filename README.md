@@ -66,6 +66,24 @@ packages/
   core/     — Shared types and scene definitions
 ```
 
+## カスタマイズ
+
+### プロジェクト保存先ディレクトリの変更
+
+デフォルトでは `~/vkoma-projects` にプロジェクトが保存されます。
+`VKOMA_PROJECTS_DIR` 環境変数を設定することで、任意のディレクトリに変更できます。
+
+```bash
+# 外付けドライブに変更する例
+export VKOMA_PROJECTS_DIR=/Volumes/2TB/vkoma-projects
+
+# または packages/server/.env.example を .env にコピーして設定
+cp packages/server/.env.example packages/server/.env
+# .env を編集して VKOMA_PROJECTS_DIR= の値を設定
+```
+
+`packages/server/.env.example` に設定例があります。
+
 ## License
 
 MIT
