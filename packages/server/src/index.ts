@@ -53,6 +53,10 @@ interface Project {
   updatedAt: string;
 }
 
+type ProjectPatchBody = Partial<Omit<Project, "id" | "createdAt" | "updatedAt">> & {
+  timeline?: Partial<NonNullable<Project["timeline"]>>;
+};
+
 interface SavedSceneItem {
   id: string;
   name: string;
@@ -64,7 +68,6 @@ interface SavedSceneItem {
 }
 
 const app = new Hono();
-handleAiChat(app);
 let projectsRoot = process.env.VKOMA_PROJECTS_DIR ?? path.join(os.homedir(), "vkoma-projects");
 const CONFIG_FILE = path.join(os.homedir(), ".vkoma-config.json");
 const MV_ASSETS_DIR = "/Volumes/2TB/openclaw/workspace/projects/vkoma/mv-assets";
@@ -79,6 +82,8 @@ try {
 } catch {
   // No config file yet, use default
 }
+
+handleAiChat(app, { getProjectsRoot: () => projectsRoot });
 
 app.get("/api/mv-assets/:filename", async (c) => {
   const filename = c.req.param("filename");
@@ -128,6 +133,29 @@ async function writeProject(project: Project) {
   const projectDir = getProjectDir(project.id);
   await mkdir(projectDir, { recursive: true });
   await writeFile(getProjectFile(project.id), JSON.stringify(project, null, 2), "utf8");
+}
+
+function mergeProjectPatch(project: Project, patch: ProjectPatchBody): Project {
+  const nextProject: Project = { ...project };
+
+  if ("name" in patch && typeof patch.name === "string") {
+    nextProject.name = patch.name;
+  }
+
+  if ("scenes" in patch && Array.isArray(patch.scenes)) {
+    nextProject.scenes = patch.scenes;
+  }
+
+  if ("timeline" in patch && patch.timeline && typeof patch.timeline === "object") {
+    nextProject.timeline = {
+      duration: project.timeline?.duration ?? 0,
+      tracks: project.timeline?.tracks ?? [],
+      ...patch.timeline,
+    };
+  }
+
+  nextProject.updatedAt = new Date().toISOString();
+  return nextProject;
 }
 
 function deserializeServerScenes(rawScenes: unknown): SceneItem[] {
@@ -597,6 +625,22 @@ app.put("/api/projects/:id", async (c) => {
 
   await writeProject(project);
   return c.json({ project });
+});
+
+app.patch("/api/projects/:id", async (c) => {
+  let project: Project;
+
+  try {
+    project = await readProject(c.req.param("id"));
+  } catch {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as ProjectPatchBody;
+  const updatedProject = mergeProjectPatch(project, body);
+
+  await writeProject(updatedProject);
+  return c.json({ project: updatedProject });
 });
 
 // Deprecated: retained for backward compatibility with the legacy one-shot Claude CLI flow.

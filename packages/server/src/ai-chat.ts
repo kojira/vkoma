@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
@@ -22,6 +22,15 @@ type ChatRequestBody = {
 type ConversationMessage = {
   role: "user" | "assistant";
   content: string;
+};
+
+type PersistedChatMessage = ConversationMessage & {
+  id: string;
+  timestamp: string;
+};
+
+type ChatHistoryBody = {
+  messages?: Array<Partial<PersistedChatMessage>>;
 };
 
 type ScenePayload = {
@@ -49,11 +58,13 @@ type ParsedAiResponse = {
 const MODEL = "claude-sonnet-4-20250514";
 const MAX_HISTORY_MESSAGES = 20;
 const sessionHistories = new Map<string, ConversationMessage[]>();
+const CHAT_HISTORY_FILENAME = "chat-history.json";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let systemPromptPromise: Promise<string> | null = null;
+let getProjectsRoot: (() => string) | null = null;
 
 function baseSystemPrompt(sceneAuthoringGuide: string): string {
   return [
@@ -137,6 +148,89 @@ function trimHistory(history: ConversationMessage[]): ConversationMessage[] {
   return history.slice(-MAX_HISTORY_MESSAGES);
 }
 
+function generateMessageId(): string {
+  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getChatHistoryFile(projectId: string): string | null {
+  if (!getProjectsRoot || !projectId.trim()) {
+    return null;
+  }
+
+  return path.join(getProjectsRoot(), projectId, CHAT_HISTORY_FILENAME);
+}
+
+function isPersistedRole(role: unknown): role is PersistedChatMessage["role"] {
+  return role === "user" || role === "assistant";
+}
+
+function normalizePersistedMessage(
+  message: Partial<PersistedChatMessage>,
+): PersistedChatMessage | null {
+  if (!isPersistedRole(message.role) || typeof message.content !== "string") {
+    return null;
+  }
+
+  return {
+    role: message.role,
+    content: message.content,
+    id: typeof message.id === "string" && message.id.trim() ? message.id : generateMessageId(),
+    timestamp:
+      typeof message.timestamp === "string" && message.timestamp.trim()
+        ? message.timestamp
+        : new Date().toISOString(),
+  };
+}
+
+async function readPersistedChatHistory(projectId: string): Promise<PersistedChatMessage[]> {
+  const historyFile = getChatHistoryFile(projectId);
+  if (!historyFile) {
+    return [];
+  }
+
+  try {
+    const raw = await readFile(historyFile, "utf8");
+    const parsed = JSON.parse(raw) as ChatHistoryBody;
+    if (!Array.isArray(parsed.messages)) {
+      return [];
+    }
+
+    return parsed.messages
+      .map((message) => normalizePersistedMessage(message))
+      .filter((message): message is PersistedChatMessage => message !== null);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function writePersistedChatHistory(
+  projectId: string,
+  messages: PersistedChatMessage[],
+): Promise<void> {
+  const historyFile = getChatHistoryFile(projectId);
+  if (!historyFile) {
+    return;
+  }
+
+  await mkdir(path.dirname(historyFile), { recursive: true });
+  await writeFile(historyFile, JSON.stringify({ messages }, null, 2), "utf8");
+}
+
+async function appendPersistedChatHistory(
+  projectId: string,
+  messages: PersistedChatMessage[],
+): Promise<void> {
+  if (!projectId.trim() || messages.length === 0) {
+    return;
+  }
+
+  const history = await readPersistedChatHistory(projectId);
+  await writePersistedChatHistory(projectId, [...history, ...messages]);
+}
+
 function extractJsonObject(text: string): string | null {
   const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (codeBlockMatch) {
@@ -206,7 +300,43 @@ function parseAiResponse(text: string): ParsedAiResponse {
   };
 }
 
-export function handleAiChat(app: Hono): void {
+export function handleAiChat(
+  app: Hono,
+  options?: {
+    getProjectsRoot?: () => string;
+  },
+): void {
+  getProjectsRoot = options?.getProjectsRoot ?? null;
+
+  app.get("/api/projects/:id/chat-history", async (c) => {
+    const projectId = c.req.param("id");
+
+    try {
+      const messages = await readPersistedChatHistory(projectId);
+      return c.json({ messages });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to read chat history";
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  app.post("/api/projects/:id/chat-history", async (c) => {
+    const projectId = c.req.param("id");
+    const body = (await c.req.json().catch(() => ({}))) as ChatHistoryBody;
+    const incomingMessages = Array.isArray(body.messages) ? body.messages : [];
+    const messages = incomingMessages
+      .map((message) => normalizePersistedMessage(message))
+      .filter((message): message is PersistedChatMessage => message !== null);
+
+    try {
+      await writePersistedChatHistory(projectId, messages);
+      return c.json({ ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save chat history";
+      return c.json({ error: message }, 500);
+    }
+  });
+
   app.post("/api/ai/chat", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as ChatRequestBody;
     const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
@@ -291,6 +421,23 @@ export function handleAiChat(app: Hono): void {
             { role: "assistant", content: fullText },
           ]);
           sessionHistories.set(sessionId, nextHistory);
+
+          if (projectId) {
+            await appendPersistedChatHistory(projectId, [
+              {
+                id: generateMessageId(),
+                role: "user",
+                content: message,
+                timestamp: new Date().toISOString(),
+              },
+              {
+                id: generateMessageId(),
+                role: "assistant",
+                content: parsed.message ?? fullText,
+                timestamp: new Date().toISOString(),
+              },
+            ]);
+          }
 
           if (parsed.scenes) {
             send({ type: "scenes", scenes: parsed.scenes });
