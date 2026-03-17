@@ -102,7 +102,12 @@ function writeSessionId(sessionId: string | null) {
   window.history.replaceState({}, "", url);
 }
 
-export function ChatPanel() {
+type ChatPanelProps = {
+  newChatNonce?: number;
+  showNewChatButton?: boolean;
+};
+
+export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -230,6 +235,15 @@ export function ChatPanel() {
       return next;
     });
   }, []);
+
+  const handleNewChat = useCallback(() => {
+    intentionalCloseRef.current = true;
+    sessionIdRef.current = null;
+    writeSessionId(null);
+    setResetCounter((value) => value + 1);
+  }, []);
+
+  const previousNewChatNonceRef = useRef(newChatNonce);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -514,8 +528,17 @@ export function ChatPanel() {
     }
   }, [fontSize]);
 
+  useEffect(() => {
+    if (previousNewChatNonceRef.current === newChatNonce) {
+      return;
+    }
+
+    previousNewChatNonceRef.current = newChatNonce;
+    handleNewChat();
+  }, [handleNewChat, newChatNonce]);
+
   return (
-    <aside className="flex h-full w-full min-w-0 flex-col rounded-xl border border-gray-800 bg-[#141625] pb-12 lg:h-full lg:w-80 md:pb-0">
+    <aside className="flex h-full w-full min-w-0 flex-col rounded-xl border border-gray-800 bg-[#141625] lg:h-full lg:w-80">
       <div className="border-b border-gray-800 px-3 py-2 lg:px-4 lg:py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
@@ -544,18 +567,15 @@ export function ChatPanel() {
                 +
               </button>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                intentionalCloseRef.current = true;
-                sessionIdRef.current = null;
-                writeSessionId(null);
-                setResetCounter((value) => value + 1);
-              }}
-              className="rounded-md border border-gray-700 px-2 py-0.5 text-[10px] font-medium text-gray-300 transition hover:border-gray-500 hover:text-white lg:px-2.5 lg:py-1 lg:text-xs"
-            >
-              New Chat
-            </button>
+            {showNewChatButton && (
+              <button
+                type="button"
+                onClick={handleNewChat}
+                className="rounded-md border border-gray-700 px-2 py-0.5 text-[10px] font-medium text-gray-300 transition hover:border-gray-500 hover:text-white lg:px-2.5 lg:py-1 lg:text-xs"
+              >
+                New Chat
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -594,44 +614,48 @@ export function ChatPanel() {
         </div>
       </div>
       <div className="flex-shrink-0 border-t border-gray-800 bg-[#141625] p-1.5 md:hidden">
-        <div className="flex gap-1 overflow-x-auto">
-          {MOBILE_CONTROL_KEYS.flat().map((button) => {
-            const isShift = button.id === "shift";
-            const isCtrl = button.id === "ctrl";
-            const isActive = (isShift && shiftActive) || (isCtrl && ctrlActive);
+        <div className="space-y-2">
+          {MOBILE_CONTROL_KEYS.map((row, index) => (
+            <div key={index} className={index === 0 ? "grid grid-cols-6 gap-2" : "grid grid-cols-8 gap-2"}>
+              {row.map((button) => {
+                const isShift = button.id === "shift";
+                const isCtrl = button.id === "ctrl";
+                const isActive = (isShift && shiftActive) || (isCtrl && ctrlActive);
 
-            return (
-              <button
-                key={button.id}
-                type="button"
-                onClick={() => {
-                  if (isShift) {
-                    setShiftActive((value) => !value);
-                    return;
-                  }
-                  if (isCtrl) {
-                    setCtrlActive((value) => !value);
-                    return;
-                  }
-                  sendControlKey(button.id);
-                }}
-                className={[
-                  "min-h-[28px] flex-shrink-0 rounded-lg border border-gray-800 bg-white/5 px-2 py-0.5 text-[10px] text-gray-300 transition active:bg-white/10",
-                  "touch-manipulation",
-                  isShift && isActive
-                    ? "border-[rgba(125,211,252,0.5)] bg-[rgba(125,211,252,0.25)] text-[#7dd3fc]"
-                    : "",
-                  isCtrl && isActive
-                    ? "border-[rgba(126,231,135,0.5)] bg-[rgba(126,231,135,0.25)] text-[#7ee787]"
-                    : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-              >
-                {button.label}
-              </button>
-            );
-          })}
+                return (
+                  <button
+                    key={button.id}
+                    type="button"
+                    onClick={() => {
+                      if (isShift) {
+                        setShiftActive((value) => !value);
+                        return;
+                      }
+                      if (isCtrl) {
+                        setCtrlActive((value) => !value);
+                        return;
+                      }
+                      sendControlKey(button.id);
+                    }}
+                    className={[
+                      "min-h-[44px] rounded-xl border border-gray-800 bg-white/5 px-2 py-1 text-sm text-gray-300 transition active:bg-white/10",
+                      "touch-manipulation",
+                      isShift && isActive
+                        ? "border-[rgba(125,211,252,0.5)] bg-[rgba(125,211,252,0.25)] text-[#7dd3fc]"
+                        : "",
+                      isCtrl && isActive
+                        ? "border-[rgba(126,231,135,0.5)] bg-[rgba(126,231,135,0.25)] text-[#7ee787]"
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  >
+                    {button.label}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </div>
     </aside>
