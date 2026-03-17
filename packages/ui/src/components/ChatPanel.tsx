@@ -653,17 +653,13 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
                       sendControlKey(button.id);
                     }}
                     className={[
-                      "min-h-[44px] rounded-xl border border-gray-800 bg-white/5 px-2 py-1 text-sm text-gray-300 transition active:bg-white/10",
-                      "touch-manipulation",
-                      isShift && isActive
-                        ? "border-[rgba(125,211,252,0.5)] bg-[rgba(125,211,252,0.25)] text-[#7dd3fc]"
-                        : "",
-                      isCtrl && isActive
-                        ? "border-[rgba(126,231,135,0.5)] bg-[rgba(126,231,135,0.25)] text-[#7ee787]"
-                        : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
+                      "min-h-[44px] rounded-xl px-2 py-1 text-sm transition active:bg-white/10 touch-manipulation",
+                      isActive
+                        ? isShift
+                          ? "border-2 border-[#7dd3fc] bg-[rgba(125,211,252,0.25)] text-[#7dd3fc] font-bold"
+                          : "border-2 border-[#7ee787] bg-[rgba(126,231,135,0.25)] text-[#7ee787] font-bold"
+                        : "border border-gray-800 bg-white/5 text-gray-300",
+                    ].join(" ")}
                   >
                     {button.label}
                   </button>
