@@ -559,7 +559,7 @@ export function ChatPanel() {
           </div>
         </div>
       </div>
-      <div className="min-h-0 flex-1 p-2 pb-[calc(env(safe-area-inset-bottom,0px)+10rem)] lg:pb-2">
+      <div className="min-h-0 flex-1 p-2 pb-[calc(env(safe-area-inset-bottom,0px)+14rem)] lg:pb-2">
         <div
           ref={containerRef}
           className="h-full w-full overflow-hidden rounded-lg border border-gray-900/80 bg-[#141625] p-2"
@@ -580,22 +580,22 @@ export function ChatPanel() {
             autoComplete="off"
             autoCapitalize="off"
             spellCheck={false}
-            className="min-h-[44px] flex-1 rounded-md border border-gray-800 bg-[#1a1d31] px-3 text-sm text-gray-200 outline-none transition focus:border-[#7dd3fc]/50 focus:ring-2 focus:ring-[#7dd3fc]/15"
+            className="min-h-[36px] flex-1 rounded-md border border-gray-800 bg-[#1a1d31] px-3 text-xs text-gray-200 outline-none transition focus:border-[#7dd3fc]/50 focus:ring-2 focus:ring-[#7dd3fc]/15"
           />
           <button
             type="button"
             onClick={sendImeInput}
-            className="min-h-[44px] rounded-md bg-[#7dd3fc] px-4 text-sm font-medium text-[#08111d] transition hover:brightness-105 active:translate-y-px"
+            className="min-h-[36px] rounded-md bg-[#7dd3fc] px-4 text-xs font-medium text-[#08111d] transition hover:brightness-105 active:translate-y-px"
           >
             Send
           </button>
         </div>
       </div>
-      <div className="fixed inset-x-0 bottom-0 z-10 grid grid-rows-2 gap-2 border-t border-gray-800 bg-[#141625]/90 p-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] backdrop-blur md:hidden">
+      <div className="fixed inset-x-0 bottom-[56px] z-10 grid grid-rows-2 gap-1 border-t border-gray-800 bg-[#141625]/90 p-2 pb-2 backdrop-blur md:hidden">
         {MOBILE_CONTROL_KEYS.map((row, rowIndex) => (
           <div
             key={rowIndex}
-            className={rowIndex === 0 ? "grid grid-cols-6 gap-2" : "grid grid-cols-8 gap-2"}
+            className={rowIndex === 0 ? "grid grid-cols-6 gap-1" : "grid grid-cols-8 gap-1"}
           >
             {row.map((button) => {
               const isShift = button.id === "shift";
@@ -618,7 +618,7 @@ export function ChatPanel() {
                     sendControlKey(button.id);
                   }}
                   className={[
-                    "min-h-[44px] rounded-xl border border-gray-800 bg-white/5 text-sm text-gray-300 transition active:bg-white/10",
+                    "min-h-[36px] rounded-xl border border-gray-800 bg-white/5 text-xs text-gray-300 transition active:bg-white/10",
                     "touch-manipulation",
                     isShift && isActive
                       ? "border-[rgba(125,211,252,0.5)] bg-[rgba(125,211,252,0.25)] text-[#7dd3fc]"
