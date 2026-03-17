@@ -559,6 +559,41 @@ function easeOutBounce(t) {
 - [ ] フォント指定にフォールバックを含めているか
 - [ ] time（秒）を正しく使ってアニメーションしているか
 
+## アセット管理
+
+プロジェクトにアップロードされたファイル（画像・音声・動画・フォント）はアセットとして管理される。
+
+### AssetType
+- `image` — PNG, JPEG, GIF, WebP, SVG, BMP, TIFF
+- `audio` — MP3, WAV, M4A, OGG, AAC, FLAC, WebM
+- `video` — MP4, WebM, OGG, MOV, AVI, MPEG
+- `font` — TTF, OTF, WOFF, WOFF2
+
+### Asset構造
+```typescript
+interface Asset {
+  id: string;
+  type: AssetType;    // "image" | "audio" | "video" | "font"
+  name: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  width?: number;     // 画像・動画のみ
+  height?: number;    // 画像・動画のみ
+  duration?: number;  // 音声・動画のみ
+  projectPath: string;
+  thumbnailDataUrl?: string;
+  createdAt: string;
+}
+```
+
+### アセットの使い方
+- アセット一覧: `GET /api/projects/:id/assets`
+- アップロード: `POST /api/projects/:id/assets`（multipart/form-data）
+- 削除: `DELETE /api/projects/:id/assets/:assetId`
+- TrackItemの `assetId` にアセットIDを指定してトラックに配置
+- renderCodeから画像アセットを使う場合は `params` にアセットパスを渡す
+
 ## マルチトラックタイムライン
 
 vkomaはマルチトラック構成。各トラックにアイテムを配置して動画を構成する。
