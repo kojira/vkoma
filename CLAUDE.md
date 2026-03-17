@@ -545,6 +545,71 @@ function easeOutBounce(t) {
 
 ---
 
+## ワークフロー例
+
+### 例: 「アセットの音源をトラックに追加してイコライザーシーンを作る」
+
+1. **アセット一覧を取得して音源を見つける**
+```bash
+curl http://localhost:3001/api/projects/{projectId}/assets
+# → audioタイプのアセットを探す
+```
+
+2. **audioトラックを追加してアセットを配置**
+```bash
+curl -X PUT http://localhost:3001/api/projects/{projectId} \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "timeline": {
+      "duration": 30,
+      "tracks": [
+        {
+          "id": "audio-1",
+          "type": "audio",
+          "name": "BGM",
+          "zOrder": 0,
+          "muted": false,
+          "locked": false,
+          "visible": true,
+          "items": [{
+            "id": "audio-item-1",
+            "trackId": "audio-1",
+            "startTime": 0,
+            "duration": 30,
+            "assetId": "音源のアセットID",
+            "params": {}
+          }]
+        },
+        {
+          "id": "video-1",
+          "type": "video",
+          "name": "Equalizer",
+          "zOrder": 1,
+          "muted": false,
+          "locked": false,
+          "visible": true,
+          "items": [{
+            "id": "eq-item-1",
+            "trackId": "video-1",
+            "startTime": 0,
+            "duration": 30,
+            "params": {},
+            "renderCode": "イコライザーのrenderCode（下記参照）"
+          }]
+        }
+      ]
+    }
+  }'
+```
+
+3. **イコライザーrenderCode**（FFTセクション参照）
+   - `params.fftBands` をJSON.parseして周波数バーを描画
+   - `params.beatIntensity` で光や色の演出を追加
+
+### 注意: 既存データの保持
+- `PUT /api/projects/:id` は全体上書きなので、既存のscenes等を含めて送信する
+- まず `GET /api/projects/:id` で現在の状態を取得し、必要な部分だけ変更して送り返す
+
 ## エラーを避けるためのチェックリスト
 
 シーンを生成する前に確認:
