@@ -1447,4 +1447,5 @@ createChatServer(server, {
   path: "/terminal-ws",
   provider: process.env.AI_PROVIDER || "claude",
   cwd: process.env.VKOMA_PROJECTS_DIR || path.join(os.homedir(), "vkoma-projects"),
+  env: { ...process.env, PATH: process.env.PATH + ":/usr/local/bin:/Users/kojira/.local/bin" },
 });

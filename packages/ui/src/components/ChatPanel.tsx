@@ -82,9 +82,12 @@ export function ChatPanel() {
     const webLinksAddon = new WebLinksAddon();
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
-    terminal.open(container);
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    let terminalOpened = false;
+    let dimensionObserver: ResizeObserver | null = null;
+    let rafId: number | null = null;
+    let compositionContainer: Element | null = null;
 
     const clearReconnectTimer = () => {
       if (reconnectTimerRef.current !== null) {
@@ -109,7 +112,14 @@ export function ChatPanel() {
     };
 
     const fitTerminal = () => {
-      fitAddon.fit();
+      if (!terminalOpened) {
+        return;
+      }
+      try {
+        fitAddon.fit();
+      } catch {
+        // dimensions not ready yet
+      }
       sendResize();
     };
 
@@ -224,7 +234,6 @@ export function ChatPanel() {
       socket.send(data);
     });
 
-    const compositionContainer = container.querySelector(".xterm-helper-textarea");
     const handleCompositionStart = () => {
       compositionRef.current = true;
     };
@@ -232,26 +241,66 @@ export function ChatPanel() {
       compositionRef.current = false;
     };
 
-    compositionContainer?.addEventListener("compositionstart", handleCompositionStart);
-    compositionContainer?.addEventListener("compositionend", handleCompositionEnd);
-
     resizeObserverRef.current = new ResizeObserver(() => {
-      fitTerminal();
+      if (terminalOpened) {
+        fitTerminal();
+      }
     });
     resizeObserverRef.current.observe(container);
 
     const handleWindowResize = () => fitTerminal();
     window.addEventListener("resize", handleWindowResize);
 
-    requestAnimationFrame(() => {
-      fitTerminal();
-      connect();
-    });
+    const openTerminal = () => {
+      if (terminalOpened) {
+        return;
+      }
+      terminalOpened = true;
+      compositionContainer = container.querySelector(".xterm-helper-textarea");
+      compositionContainer?.addEventListener("compositionstart", handleCompositionStart);
+      compositionContainer?.addEventListener("compositionend", handleCompositionEnd);
+    };
+
+    const openTerminalAndConnect = () => {
+      if (terminalOpened) {
+        return;
+      }
+
+      if (container.offsetWidth > 0 && container.offsetHeight > 0) {
+        terminal.open(container);
+        openTerminal();
+        fitTerminal();
+        connect();
+        return;
+      }
+
+      if (dimensionObserver) {
+        return;
+      }
+
+      dimensionObserver = new ResizeObserver(() => {
+        if (container.offsetWidth > 0 && container.offsetHeight > 0) {
+          dimensionObserver?.disconnect();
+          dimensionObserver = null;
+          terminal.open(container);
+          openTerminal();
+          fitTerminal();
+          connect();
+        }
+      });
+      dimensionObserver.observe(container);
+    };
+
+    rafId = requestAnimationFrame(openTerminalAndConnect);
 
     return () => {
       intentionalCloseRef.current = true;
       clearReconnectTimer();
       writeSessionId(sessionIdRef.current);
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
+      dimensionObserver?.disconnect();
       resizeObserverRef.current?.disconnect();
       resizeObserverRef.current = null;
       window.removeEventListener("resize", handleWindowResize);
