@@ -559,6 +559,55 @@ function easeOutBounce(t) {
 - [ ] フォント指定にフォールバックを含めているか
 - [ ] time（秒）を正しく使ってアニメーションしているか
 
+## マルチトラックタイムライン
+
+vkomaはマルチトラック構成。各トラックにアイテムを配置して動画を構成する。
+
+### トラックの種類（TrackType）
+- `video` — 映像・アニメーションシーン
+- `image` — 静止画
+- `text` — テキストオーバーレイ
+- `audio` — 音声トラック
+- `shape` — 図形
+
+### Track構造
+```typescript
+interface Track {
+  id: string;
+  type: TrackType;  // "video" | "image" | "text" | "audio" | "shape"
+  name: string;
+  zOrder: number;   // 描画順（大きいほど前面）
+  muted: boolean;
+  locked: boolean;
+  visible: boolean;
+  items: TrackItem[];
+}
+```
+
+### TrackItem構造
+```typescript
+interface TrackItem {
+  id: string;
+  trackId: string;
+  startTime: number;    // 開始時刻（秒）
+  duration: number;     // 長さ（秒）
+  sceneConfigId?: string;  // シーン設定のID
+  assetId?: string;     // アセットID（画像・音声等）
+  params: Record<string, unknown>;
+  transitionIn?: TransitionConfig;
+  transitionOut?: TransitionConfig;
+  keyframes?: Record<string, Keyframe[]>;
+  renderCode?: string;  // カスタム描画コード
+}
+```
+
+### タイムラインの使い方
+- 複数トラックを重ねてレイヤー合成（zOrderで順序制御）
+- 各アイテムは `startTime` と `duration` で時間軸上に配置
+- audioトラックにBGMや効果音を配置
+- videoトラックにシーン（renderCode）を配置
+- textトラックに歌詞やタイトルを配置
+
 ## 背景画像
 
 プロジェクトに背景画像を設定できる。背景画像は `destination-over` 合成でrenderCodeの描画の背面に自動合成される（renderCodeで描いた内容が前面に来る）。
