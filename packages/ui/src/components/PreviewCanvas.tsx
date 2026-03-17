@@ -1,6 +1,7 @@
 import { Component, useEffect, useRef, type ErrorInfo, type ReactNode } from "react";
 import { renderScene } from "@vkoma/core";
 import { getSceneAtFrame, useSceneStore } from "../stores/sceneStore";
+import { useTimelineStore } from "../stores/timelineStore";
 
 declare global {
   interface Window {
@@ -68,6 +69,7 @@ function PreviewCanvasInner() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const liveFFTRef = useRef<number[]>([]);
+  const timelineAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
 
   const scenes = useSceneStore((state) => state.scenes);
   const bgmFile = useSceneStore((state) => state.bgmFile);
@@ -78,6 +80,8 @@ function PreviewCanvasInner() {
   const fftCache = useSceneStore((state) => state.fftCache);
   const setCurrentFrame = useSceneStore((state) => state.setCurrentFrame);
   const setCurrentScene = useSceneStore((state) => state.setCurrentScene);
+  const timelineTracks = useTimelineStore((state) => state.tracks);
+  const timelineProjectId = useTimelineStore((state) => state.projectId);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -218,6 +222,82 @@ function PreviewCanvasInner() {
         analyserRef.current = null;
         sourceRef.current = null;
       }
+    };
+  }, []);
+
+  // Timeline audio track playback
+  useEffect(() => {
+    const audioTracks = timelineTracks.filter((t) => t.type === "audio");
+    const currentAudios = timelineAudioRefs.current;
+    const activeIds = new Set<string>();
+
+    for (const track of audioTracks) {
+      if (track.muted) continue;
+      for (const item of track.items) {
+        if (!item.assetId || !timelineProjectId) continue;
+        activeIds.add(item.id);
+
+        if (!currentAudios.has(item.id)) {
+          const audio = new Audio(`/api/projects/${timelineProjectId}/assets/${item.assetId}/file`);
+          audio.preload = "auto";
+          const volume = typeof item.params?.volume === "number" ? item.params.volume : 1.0;
+          audio.volume = Math.max(0, Math.min(1, volume));
+          currentAudios.set(item.id, audio);
+        }
+      }
+    }
+
+    for (const [id, audio] of currentAudios) {
+      if (!activeIds.has(id)) {
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+        currentAudios.delete(id);
+      }
+    }
+  }, [timelineTracks, timelineProjectId]);
+
+  // Sync timeline audio playback with play state
+  useEffect(() => {
+    const audioTracks = timelineTracks.filter((t) => t.type === "audio" && !t.muted);
+    const currentAudios = timelineAudioRefs.current;
+    const globalTime = currentFrame / fps;
+
+    for (const track of audioTracks) {
+      for (const item of track.items) {
+        const audio = currentAudios.get(item.id);
+        if (!audio) continue;
+
+        const itemStart = item.startTime ?? 0;
+        const itemDuration = item.duration ?? Infinity;
+        const itemEnd = itemStart + itemDuration;
+        const localTime = globalTime - itemStart;
+
+        if (globalTime >= itemStart && globalTime < itemEnd) {
+          if (Math.abs(audio.currentTime - localTime) >= 0.5) {
+            audio.currentTime = Math.max(0, localTime);
+          }
+          if (isPlaying) {
+            void audio.play().catch(() => {});
+          } else {
+            audio.pause();
+          }
+        } else {
+          audio.pause();
+        }
+      }
+    }
+  }, [currentFrame, fps, isPlaying, timelineTracks]);
+
+  // Cleanup timeline audio on unmount
+  useEffect(() => {
+    return () => {
+      for (const [, audio] of timelineAudioRefs.current) {
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+      }
+      timelineAudioRefs.current.clear();
     };
   }, []);
 

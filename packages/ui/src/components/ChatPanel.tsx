@@ -154,6 +154,11 @@ function extractStreamingMessagePreview(rawText: string): string {
   return decodeJsonStringFragment(value);
 }
 
+function getStreamingMessagePreview(rawText: string): string {
+  const preview = extractStreamingMessagePreview(rawText).trim();
+  return preview || "考え中...";
+}
+
 function buildCompletionSummary(sceneCount: number, audioTrackCount: number): string {
   if (sceneCount === 0 && audioTrackCount === 0) {
     return "";
@@ -452,8 +457,7 @@ export function ChatPanel() {
 
           if (event.type === "text") {
             accumulatedText += event.content;
-            const preview = extractStreamingMessagePreview(accumulatedText);
-            updateMessage(streamingMsgId, preview);
+            updateMessage(streamingMsgId, getStreamingMessagePreview(accumulatedText));
             continue;
           }
 
@@ -490,9 +494,9 @@ export function ChatPanel() {
           }
 
           if (event.type === "done") {
-            const preview = extractStreamingMessagePreview(accumulatedText);
+            const preview = getStreamingMessagePreview(accumulatedText);
             const summary = buildCompletionSummary(generatedScenes.length, generatedAudioTracks.length);
-            const fallbackMessage = finalMessage || preview || "Completed.";
+            const fallbackMessage = finalMessage || preview;
             updateMessage(streamingMsgId, [fallbackMessage, summary].filter(Boolean).join("\n\n"));
           }
         }
@@ -547,7 +551,7 @@ export function ChatPanel() {
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
                 <div className="min-w-0 break-words">
-                  {message.content ? renderMessageContent(message.content) : "Thinking..."}
+                  {renderMessageContent(message.content || "考え中...")}
                 </div>
               </div>
             ) : message.content.startsWith("Error:") ? (
