@@ -118,6 +118,7 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
   const intentionalCloseRef = useRef(false);
   const sessionIdRef = useRef<string | null>(readSessionId());
   const compositionRef = useRef(false);
+  const touchHandledRef = useRef<Record<string, boolean>>({});
   const hasSavedFontSizeRef = useRef(
     typeof window !== "undefined" ? window.localStorage.getItem(FONT_SIZE_STORAGE_KEY) !== null : false,
   );
@@ -241,6 +242,22 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
     sessionIdRef.current = null;
     writeSessionId(null);
     setResetCounter((value) => value + 1);
+  }, []);
+
+  const handleButtonTouchStart = useCallback((key: string, action: () => void) => {
+    touchHandledRef.current[key] = true;
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    action();
+  }, []);
+
+  const handleButtonClick = useCallback((key: string, action: () => void) => {
+    if (touchHandledRef.current[key]) {
+      touchHandledRef.current[key] = false;
+      return;
+    }
+    action();
   }, []);
 
   const previousNewChatNonceRef = useRef(newChatNonce);
@@ -555,7 +572,11 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
                 type="button"
                 tabIndex={-1}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => changeFontSize(-1)}
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  handleButtonTouchStart("font-size-decrease", () => changeFontSize(-1));
+                }}
+                onClick={() => handleButtonClick("font-size-decrease", () => changeFontSize(-1))}
                 className="flex min-h-[28px] w-7 items-center justify-center rounded border border-gray-700 text-xs text-gray-300 transition hover:border-gray-500 hover:text-white lg:min-h-[32px] lg:w-8 lg:text-sm"
                 aria-label="Decrease terminal font size"
               >
@@ -566,7 +587,11 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
                 type="button"
                 tabIndex={-1}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => changeFontSize(1)}
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  handleButtonTouchStart("font-size-increase", () => changeFontSize(1));
+                }}
+                onClick={() => handleButtonClick("font-size-increase", () => changeFontSize(1))}
                 className="flex min-h-[28px] w-7 items-center justify-center rounded border border-gray-700 text-xs text-gray-300 transition hover:border-gray-500 hover:text-white lg:min-h-[32px] lg:w-8 lg:text-sm"
                 aria-label="Increase terminal font size"
               >
@@ -578,7 +603,11 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
                 type="button"
                 tabIndex={-1}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={handleNewChat}
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  handleButtonTouchStart("new-chat", handleNewChat);
+                }}
+                onClick={() => handleButtonClick("new-chat", handleNewChat)}
                 className="min-h-[32px] rounded-xl border border-gray-700 px-2 py-0.5 text-[10px] font-medium text-gray-300 transition hover:border-gray-500 hover:text-white lg:min-h-0 lg:rounded-md lg:px-2.5 lg:py-1 lg:text-xs"
               >
                 New Chat
@@ -616,7 +645,11 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
             type="button"
             tabIndex={-1}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={sendImeInput}
+            onTouchStart={(e) => {
+              e.preventDefault();
+              handleButtonTouchStart("send-ime-input", sendImeInput);
+            }}
+            onClick={() => handleButtonClick("send-ime-input", sendImeInput)}
             className="min-h-[32px] rounded-md bg-[#7dd3fc] px-3 text-xs font-medium text-[#08111d] transition hover:brightness-105 active:translate-y-px"
           >
             Send
@@ -638,29 +671,40 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
                     type="button"
                     tabIndex={-1}
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      if (isShift) {
-                        setShiftActive((value) => !value);
-                        return;
-                      }
-                      if (isCtrl) {
-                        setCtrlActive((value) => !value);
-                        return;
-                      }
-                      sendControlKey(button.id);
+                    onTouchStart={(e) => {
+                      e.preventDefault();
+                      handleButtonTouchStart(`mobile-control-${button.id}`, () => {
+                        if (isShift) {
+                          setShiftActive((value) => !value);
+                          return;
+                        }
+                        if (isCtrl) {
+                          setCtrlActive((value) => !value);
+                          return;
+                        }
+                        sendControlKey(button.id);
+                      });
                     }}
-                    className={[
-                      "min-h-[44px] rounded-xl border border-gray-800 bg-white/5 px-2 py-1 text-sm text-gray-300 transition active:bg-white/10",
-                      "touch-manipulation",
+                    onClick={() =>
+                      handleButtonClick(`mobile-control-${button.id}`, () => {
+                        if (isShift) {
+                          setShiftActive((value) => !value);
+                          return;
+                        }
+                        if (isCtrl) {
+                          setCtrlActive((value) => !value);
+                          return;
+                        }
+                        sendControlKey(button.id);
+                      })
+                    }
+                    className={
                       isShift && isActive
-                        ? "border-[rgba(125,211,252,0.5)] bg-[rgba(125,211,252,0.25)] text-[#7dd3fc]"
-                        : "",
-                      isCtrl && isActive
-                        ? "border-[rgba(126,231,135,0.5)] bg-[rgba(126,231,135,0.25)] text-[#7ee787]"
-                        : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
+                        ? "min-h-[44px] rounded-xl px-2 py-1 text-sm transition active:bg-white/10 touch-manipulation border-2 border-sky-400 bg-sky-400/25 text-sky-400 font-bold"
+                        : isCtrl && isActive
+                          ? "min-h-[44px] rounded-xl px-2 py-1 text-sm transition active:bg-white/10 touch-manipulation border-2 border-green-400 bg-green-400/25 text-green-400 font-bold"
+                          : "min-h-[44px] rounded-xl px-2 py-1 text-sm transition active:bg-white/10 touch-manipulation border border-gray-800 bg-white/5 text-gray-300"
+                    }
                   >
                     {button.label}
                   </button>
