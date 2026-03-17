@@ -639,6 +639,9 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
                     tabIndex={-1}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
+                      if (document.activeElement instanceof HTMLElement) {
+                        document.activeElement.blur();
+                      }
                       if (isShift) {
                         setShiftActive((value) => !value);
                         return;
