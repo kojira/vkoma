@@ -1,6 +1,6 @@
-import { Component, useEffect, useRef, type ErrorInfo, type ReactNode } from "react";
-import { renderScene } from "@vkoma/core";
-import { getSceneAtFrame, useSceneStore } from "../stores/sceneStore";
+import { Component, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
+import { allScenePresets, renderScene } from "@vkoma/core";
+import { resolveSceneConfig } from "../stores/sceneStore";
 import { useTimelineStore } from "../stores/timelineStore";
 
 declare global {
@@ -60,28 +60,30 @@ const toImageUrl = (path: string): string => {
 
 function PreviewCanvasInner() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const animationRef = useRef<number | null>(null);
+  const [, setImageVersion] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
-  const frameAccumulatorRef = useRef(0);
-  const lastTimestampRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const liveFFTRef = useRef<number[]>([]);
   const timelineAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const renderFunctionCacheRef = useRef<
+    Map<
+      string,
+      ((ctx: CanvasRenderingContext2D, params: Record<string, unknown>, time: number) => void) | null
+    >
+  >(new Map());
 
-  const scenes = useSceneStore((state) => state.scenes);
-  const bgmFile = useSceneStore((state) => state.bgmFile);
-  const currentSceneIndex = useSceneStore((state) => state.currentSceneIndex);
-  const currentFrame = useSceneStore((state) => state.currentFrame);
-  const isPlaying = useSceneStore((state) => state.isPlaying);
-  const fps = useSceneStore((state) => state.fps);
-  const fftCache = useSceneStore((state) => state.fftCache);
-  const setCurrentFrame = useSceneStore((state) => state.setCurrentFrame);
-  const setCurrentScene = useSceneStore((state) => state.setCurrentScene);
-  const timelineTracks = useTimelineStore((state) => state.tracks);
-  const timelineProjectId = useTimelineStore((state) => state.projectId);
+  const isPlaying = useTimelineStore((state) => state.isPlaying);
+  const currentTime = useTimelineStore((state) => state.currentTime);
+  const fps = useTimelineStore((state) => state.fps);
+  const tracks = useTimelineStore((state) => state.tracks);
+  const projectId = useTimelineStore((state) => state.projectId);
+  const bgmFile = useTimelineStore((state) => state.bgmFile);
+  const fftCache = useTimelineStore((state) => state.fftCache);
+  const setPlaying = useTimelineStore((state) => state.setPlaying);
+  const setCurrentTime = useTimelineStore((state) => state.setCurrentTime);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -94,84 +96,141 @@ function PreviewCanvasInner() {
       return;
     }
 
-    const activeRange = getSceneAtFrame(scenes, fps, currentFrame);
-    const selectedScene = scenes[currentSceneIndex];
-    const range = activeRange ?? (selectedScene ? { scene: selectedScene, startFrame: 0 } : null);
-
-    if (!range) {
-      ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      return;
-    }
-
-    if (activeRange && activeRange.index !== currentSceneIndex) {
-      setCurrentScene(activeRange.index);
-    }
-
-    const localFrame = Math.max(0, currentFrame - (activeRange?.startFrame ?? 0));
-    const localTime = localFrame / fps;
-    const bgImagePath =
-      typeof range.scene.params?.bgImagePath === "string" ? range.scene.params.bgImagePath : "";
-
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    const fftFrame = fftCache?.frames[currentFrame];
+    const frameIndex = Math.max(0, Math.floor(currentTime * fps));
+    const fftFrame = fftCache?.frames[frameIndex];
+    const analyser = analyserRef.current;
+    if (analyser && isPlaying) {
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(dataArray);
+      liveFFTRef.current = Array.from(dataArray, (value) => value / 255);
+    } else if (!isPlaying) {
+      liveFFTRef.current = [];
+    }
+
     const liveFFT = liveFFTRef.current;
     const hasLiveFFT = liveFFT.length > 0 && isPlaying;
-    const sceneForRender = hasLiveFFT
-      ? {
-          ...range.scene,
-          params: {
-            ...range.scene.params,
-            fftBands: JSON.stringify(liveFFT),
-            beatIntensity: 0,
-          },
-        }
-      : fftFrame
-        ? {
-            ...range.scene,
-            params: {
-              ...range.scene.params,
-              fftBands: JSON.stringify(fftFrame.bands),
-              beatIntensity: fftFrame.beatIntensity,
-            },
-          }
-        : range.scene;
-    renderScene(sceneForRender, ctx, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
+    const fftBands = hasLiveFFT ? liveFFT : (fftFrame?.bands ?? []);
+    const beatIntensity = hasLiveFFT ? 0 : (fftFrame?.beatIntensity ?? 0);
 
-    if (bgImagePath) {
-      const imageUrl = toImageUrl(bgImagePath);
-      let image = imageCache.get(imageUrl);
-      if (!image) {
-        image = new Image();
-        image.src = imageUrl;
-        imageCache.set(imageUrl, image);
-        image.onload = () => {
-          // Trigger re-render when image loads
-          const canvas = canvasRef.current;
-          const ctx2 = canvas?.getContext("2d");
-          if (!ctx2) return;
-          ctx2.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-          renderScene(sceneForRender, ctx2, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
+    const activeVideoItems = tracks
+      .filter((track) => track.type === "video" && track.visible && !track.muted)
+      .sort((a, b) => a.zOrder - b.zOrder)
+      .flatMap((track) =>
+        track.items
+          .filter(
+            (item) =>
+              currentTime >= item.startTime && currentTime < item.startTime + item.duration,
+          )
+          .map((item) => ({ item, zOrder: track.zOrder })),
+      )
+      .sort((a, b) => a.zOrder - b.zOrder);
+
+    for (const { item } of activeVideoItems) {
+      const localTime = currentTime - item.startTime;
+      const params: Record<string, unknown> = {
+        ...item.params,
+        fftBands: JSON.stringify(fftBands),
+        beatIntensity,
+      };
+
+      if (item.renderCode && typeof item.renderCode === "string") {
+        let drawFn = renderFunctionCacheRef.current.get(item.renderCode);
+        if (drawFn === undefined) {
           try {
-            ctx2.globalCompositeOperation = "destination-over";
-            ctx2.drawImage(image!, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-            ctx2.globalCompositeOperation = "source-over";
+            drawFn = new Function(
+              "ctx",
+              "params",
+              "time",
+              item.renderCode,
+            ) as (ctx: CanvasRenderingContext2D, params: Record<string, unknown>, time: number) => void;
           } catch {
-            // Ignore broken image errors
+            drawFn = null;
           }
-        };
+          renderFunctionCacheRef.current.set(item.renderCode, drawFn);
+        }
+
+        if (drawFn) {
+          try {
+            drawFn(ctx, params, localTime);
+          } catch (error) {
+            console.error("Preview renderCode execution failed", error);
+          }
+        }
+        continue;
       }
 
-      if (image.complete && image.naturalWidth > 0) {
-        try {
-          ctx.globalCompositeOperation = "destination-over";
-          ctx.drawImage(image, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-          ctx.globalCompositeOperation = "source-over";
-        } catch {
-          // Ignore drawImage errors (e.g. Safari DOMException for broken images)
+      if (!item.sceneConfigId) {
+        continue;
+      }
+
+      const preset =
+        allScenePresets.find((entry) => entry.id === item.sceneConfigId) ??
+        resolveSceneConfig(
+          {
+            sceneConfigId: item.sceneConfigId,
+            renderCode: item.renderCode,
+            params: item.params,
+            duration: item.duration,
+            name: item.id,
+          },
+          item.id,
+        );
+      if (!preset) {
+        continue;
+      }
+
+      const scene = {
+        id: item.id,
+        name: item.id,
+        duration: item.duration,
+        sceneConfig: preset,
+        params: {
+          ...Object.fromEntries(
+            Object.entries(preset.defaultParams).map(([key, param]) => [key, param.default]),
+          ),
+          ...params,
+        },
+      };
+
+      const offscreen = document.createElement("canvas");
+      offscreen.width = CANVAS_WIDTH;
+      offscreen.height = CANVAS_HEIGHT;
+      const offscreenCtx = offscreen.getContext("2d");
+      if (!offscreenCtx) {
+        continue;
+      }
+
+      offscreenCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      renderScene(scene, offscreenCtx, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
+
+      const bgImagePath = typeof scene.params?.bgImagePath === "string" ? scene.params.bgImagePath : "";
+      if (bgImagePath) {
+        const imageUrl = toImageUrl(bgImagePath);
+        let image = imageCache.get(imageUrl);
+        if (!image) {
+          image = new Image();
+          image.src = imageUrl;
+          imageCache.set(imageUrl, image);
+          image.onload = () => {
+            setImageVersion((version) => version + 1);
+          };
+        }
+
+        if (image.complete && image.naturalWidth > 0) {
+          try {
+            offscreenCtx.globalCompositeOperation = "destination-over";
+            offscreenCtx.drawImage(image, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            offscreenCtx.globalCompositeOperation = "source-over";
+          } catch {
+            // Ignore drawImage errors for broken images.
+          }
         }
       }
+
+      ctx.drawImage(offscreen, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     }
-  }, [currentFrame, currentSceneIndex, fftCache, fps, isPlaying, scenes, setCurrentScene]);
+  }, [currentTime, fftCache, fps, isPlaying, tracks]);
 
   useEffect(() => {
     if (!audioRef.current) {
@@ -227,18 +286,18 @@ function PreviewCanvasInner() {
 
   // Timeline audio track playback
   useEffect(() => {
-    const audioTracks = timelineTracks.filter((t) => t.type === "audio");
+    const audioTracks = tracks.filter((track) => track.type === "audio");
     const currentAudios = timelineAudioRefs.current;
     const activeIds = new Set<string>();
 
     for (const track of audioTracks) {
       if (track.muted) continue;
       for (const item of track.items) {
-        if (!item.assetId || !timelineProjectId) continue;
+        if (!item.assetId || !projectId) continue;
         activeIds.add(item.id);
 
         if (!currentAudios.has(item.id)) {
-          const audio = new Audio(`/api/projects/${timelineProjectId}/assets/${item.assetId}/file`);
+          const audio = new Audio(`/api/projects/${projectId}/assets/${item.assetId}/file`);
           audio.preload = "auto";
           const volume = typeof item.params?.volume === "number" ? item.params.volume : 1.0;
           audio.volume = Math.max(0, Math.min(1, volume));
@@ -255,13 +314,13 @@ function PreviewCanvasInner() {
         currentAudios.delete(id);
       }
     }
-  }, [timelineTracks, timelineProjectId]);
+  }, [projectId, tracks]);
 
   // Sync timeline audio playback with play state
   useEffect(() => {
-    const audioTracks = timelineTracks.filter((t) => t.type === "audio" && !t.muted);
+    const audioTracks = tracks.filter((t) => t.type === "audio" && !t.muted);
     const currentAudios = timelineAudioRefs.current;
-    const globalTime = currentFrame / fps;
+    const globalTime = currentTime;
 
     for (const track of audioTracks) {
       for (const item of track.items) {
@@ -287,7 +346,7 @@ function PreviewCanvasInner() {
         }
       }
     }
-  }, [currentFrame, fps, isPlaying, timelineTracks]);
+  }, [currentTime, isPlaying, tracks]);
 
   // Cleanup timeline audio on unmount
   useEffect(() => {
@@ -303,13 +362,13 @@ function PreviewCanvasInner() {
 
   useEffect(() => {
     window.__vkoma_seekToFrame = (frameIndex: number, _fps: number) => {
-      useSceneStore.getState().setPlaying(false);
-      useSceneStore.getState().setCurrentFrame(frameIndex);
+      setPlaying(false);
+      setCurrentTime(frameIndex / fps);
     };
     return () => {
       delete window.__vkoma_seekToFrame;
     };
-  }, []);
+  }, [fps, setCurrentTime, setPlaying]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -317,7 +376,7 @@ function PreviewCanvasInner() {
       return;
     }
 
-    const targetTime = currentFrame / fps;
+    const targetTime = currentTime;
     if (Math.abs(audio.currentTime - targetTime) >= 0.5) {
       audio.currentTime = targetTime;
     }
@@ -343,71 +402,7 @@ function PreviewCanvasInner() {
     }
 
     audio.pause();
-  }, [bgmFile, currentFrame, fps, isPlaying]);
-
-  useEffect(() => {
-    if (!isPlaying) {
-      if (animationRef.current !== null) {
-        cancelAnimationFrame(animationRef.current);
-        animationRef.current = null;
-      }
-      lastTimestampRef.current = null;
-      frameAccumulatorRef.current = 0;
-      return;
-    }
-
-    const totalFrames = useSceneStore.getState().totalFrames();
-    if (totalFrames <= 0) {
-      return;
-    }
-
-    const step = 1000 / fps;
-
-    const tick = (timestamp: number) => {
-      if (lastTimestampRef.current === null) {
-        lastTimestampRef.current = timestamp;
-      }
-
-      const delta = timestamp - lastTimestampRef.current;
-      lastTimestampRef.current = timestamp;
-      frameAccumulatorRef.current += delta;
-
-      // Read live FFT data each frame
-      if (analyserRef.current) {
-        const analyser = analyserRef.current;
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        analyser.getByteFrequencyData(dataArray);
-        const bands: number[] = [];
-        for (let i = 0; i < dataArray.length; i++) {
-          bands.push(dataArray[i] / 255);
-        }
-        liveFFTRef.current = bands;
-      }
-
-      if (frameAccumulatorRef.current >= step) {
-        const framesToAdvance = Math.floor(frameAccumulatorRef.current / step);
-        frameAccumulatorRef.current -= framesToAdvance * step;
-
-        const state = useSceneStore.getState();
-        const nextTotalFrames = state.totalFrames();
-        const nextFrame =
-          nextTotalFrames > 0 ? (state.currentFrame + framesToAdvance) % nextTotalFrames : 0;
-
-        state.setCurrentFrame(nextFrame);
-      }
-
-      animationRef.current = requestAnimationFrame(tick);
-    };
-
-    animationRef.current = requestAnimationFrame(tick);
-
-    return () => {
-      if (animationRef.current !== null) {
-        cancelAnimationFrame(animationRef.current);
-        animationRef.current = null;
-      }
-    };
-  }, [fps, isPlaying, setCurrentFrame]);
+  }, [bgmFile, currentTime, isPlaying]);
 
   return (
     <div className="w-full rounded-xl border border-gray-800 bg-gray-950 p-4 shadow-2xl">
