@@ -553,6 +553,8 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
             <div className="flex items-center gap-1 rounded-md border border-gray-800 bg-[#141625] p-0.5 lg:p-1">
               <button
                 type="button"
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => changeFontSize(-1)}
                 className="flex min-h-[28px] w-7 items-center justify-center rounded border border-gray-700 text-xs text-gray-300 transition hover:border-gray-500 hover:text-white lg:min-h-[32px] lg:w-8 lg:text-sm"
                 aria-label="Decrease terminal font size"
@@ -562,6 +564,8 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
               <span className="min-w-7 text-center text-[10px] text-gray-400 lg:min-w-8 lg:text-xs">{fontSize}</span>
               <button
                 type="button"
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => changeFontSize(1)}
                 className="flex min-h-[28px] w-7 items-center justify-center rounded border border-gray-700 text-xs text-gray-300 transition hover:border-gray-500 hover:text-white lg:min-h-[32px] lg:w-8 lg:text-sm"
                 aria-label="Increase terminal font size"
@@ -572,6 +576,8 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
             {showNewChatButton && (
               <button
                 type="button"
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={handleNewChat}
                 className="min-h-[32px] rounded-xl border border-gray-700 px-2 py-0.5 text-[10px] font-medium text-gray-300 transition hover:border-gray-500 hover:text-white lg:min-h-0 lg:rounded-md lg:px-2.5 lg:py-1 lg:text-xs"
               >
@@ -608,6 +614,8 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
           />
           <button
             type="button"
+            tabIndex={-1}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={sendImeInput}
             className="min-h-[32px] rounded-md bg-[#7dd3fc] px-3 text-xs font-medium text-[#08111d] transition hover:brightness-105 active:translate-y-px"
           >
@@ -628,6 +636,8 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
                   <button
                     key={button.id}
                     type="button"
+                    tabIndex={-1}
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       if (isShift) {
                         setShiftActive((value) => !value);
