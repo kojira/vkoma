@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import {
   type SceneConfig,
   type SceneParam,
@@ -189,26 +188,24 @@ function deserializeScenes(rawScenes: unknown): SceneItem[] {
 
 const initialScenes: SceneItem[] = createInitialScenes();
 
-export const useSceneStore = create<SceneStore>()(
-  persist(
-    (set, get) => ({
-      scenes: initialScenes,
-      currentProjectId: null,
-      projectName: "",
-      bgmFile: null,
-      fftCache: null,
-      currentSceneIndex: 0,
-      isPlaying: false,
-      currentFrame: 0,
-      fps: 30,
-      totalFrames: () => {
-        const { scenes, fps } = get();
-        return scenes.reduce(
-          (sum, scene) => sum + Math.max(1, Math.round(scene.duration * fps)),
-          0,
-        );
-      },
-      loadProject: async (id) => {
+export const useSceneStore = create<SceneStore>()((set, get) => ({
+  scenes: initialScenes,
+  currentProjectId: null,
+  projectName: "",
+  bgmFile: null,
+  fftCache: null,
+  currentSceneIndex: 0,
+  isPlaying: false,
+  currentFrame: 0,
+  fps: 30,
+  totalFrames: () => {
+    const { scenes, fps } = get();
+    return scenes.reduce(
+      (sum, scene) => sum + Math.max(1, Math.round(scene.duration * fps)),
+      0,
+    );
+  },
+  loadProject: async (id) => {
         const response = await fetch(`/api/projects/${id}`);
         if (!response.ok) {
           throw new Error("Failed to load project");
@@ -256,7 +253,7 @@ export const useSceneStore = create<SceneStore>()(
           set(() => ({ fftCache: null }));
         }
       },
-      saveProject: async () => {
+  saveProject: async () => {
         const { currentProjectId, projectName, scenes } = get();
         if (!currentProjectId) {
           return;
@@ -277,7 +274,7 @@ export const useSceneStore = create<SceneStore>()(
           throw new Error("Failed to save project");
         }
       },
-      createProject: async (name) => {
+  createProject: async (name) => {
         const projectScenes = createInitialScenes();
         const response = await fetch("/api/projects", {
           method: "POST",
@@ -311,18 +308,18 @@ export const useSceneStore = create<SceneStore>()(
           isPlaying: false,
         }));
       },
-      clearProject: () =>
-        set(() => ({
-          currentProjectId: null,
-          projectName: "",
-          scenes: createInitialScenes(),
-          currentSceneIndex: 0,
-          currentFrame: 0,
-          isPlaying: false,
-        })),
-      setProjectName: (name) => set(() => ({ projectName: name })),
-      addScene: (scene) =>
-        set((state) => {
+  clearProject: () =>
+    set(() => ({
+      currentProjectId: null,
+      projectName: "",
+      scenes: createInitialScenes(),
+      currentSceneIndex: 0,
+      currentFrame: 0,
+      isPlaying: false,
+    })),
+  setProjectName: (name) => set(() => ({ projectName: name })),
+  addScene: (scene) =>
+    set((state) => {
           const nextIndex = state.scenes.length;
           const preset = allScenePresets[nextIndex % allScenePresets.length] ?? TitleScene;
           const fallback: SceneItem = {
@@ -344,8 +341,8 @@ export const useSceneStore = create<SceneStore>()(
             currentSceneIndex: nextIndex,
           };
         }),
-      removeScene: (id) =>
-        set((state) => {
+  removeScene: (id) =>
+    set((state) => {
           if (state.scenes.length <= 1) {
             return {
               scenes: state.scenes,
@@ -368,44 +365,44 @@ export const useSceneStore = create<SceneStore>()(
             currentFrame: clampFrame(state.currentFrame, totalFrames),
           };
         }),
-      updateScene: (id, updates) =>
-        set((state) => ({
-          scenes: state.scenes.map((scene) =>
-            scene.id === id
-              ? {
-                  ...scene,
-                  ...updates,
-                  duration: clampDuration(updates.duration ?? scene.duration),
-                  params: updates.params ? { ...scene.params, ...updates.params } : scene.params,
-                }
-              : scene,
-          ),
-        })),
-      setCurrentScene: (index) =>
-        set((state) => ({
-          currentSceneIndex: Math.max(0, Math.min(index, state.scenes.length - 1)),
-        })),
-      setPlaying: (isPlaying) => set(() => ({ isPlaying })),
-      setCurrentFrame: (frame) =>
-        set(() => ({
-          currentFrame: clampFrame(frame, get().totalFrames()),
-        })),
-      updateSceneParam: (id, key, value) =>
-        set((state) => ({
-          scenes: state.scenes.map((scene) =>
-            scene.id === id
-              ? {
-                  ...scene,
-                  params: {
-                    ...scene.params,
-                    [key]: value,
-                  },
-                }
-              : scene,
-          ),
-        })),
-      reorderScenes: (fromIndex, toIndex) =>
-        set((state) => {
+  updateScene: (id, updates) =>
+    set((state) => ({
+      scenes: state.scenes.map((scene) =>
+        scene.id === id
+          ? {
+              ...scene,
+              ...updates,
+              duration: clampDuration(updates.duration ?? scene.duration),
+              params: updates.params ? { ...scene.params, ...updates.params } : scene.params,
+            }
+          : scene,
+      ),
+    })),
+  setCurrentScene: (index) =>
+    set((state) => ({
+      currentSceneIndex: Math.max(0, Math.min(index, state.scenes.length - 1)),
+    })),
+  setPlaying: (isPlaying) => set(() => ({ isPlaying })),
+  setCurrentFrame: (frame) =>
+    set(() => ({
+      currentFrame: clampFrame(frame, get().totalFrames()),
+    })),
+  updateSceneParam: (id, key, value) =>
+    set((state) => ({
+      scenes: state.scenes.map((scene) =>
+        scene.id === id
+          ? {
+              ...scene,
+              params: {
+                ...scene.params,
+                [key]: value,
+              },
+            }
+          : scene,
+      ),
+    })),
+  reorderScenes: (fromIndex, toIndex) =>
+    set((state) => {
           if (
             fromIndex === toIndex ||
             fromIndex < 0 ||
@@ -426,10 +423,10 @@ export const useSceneStore = create<SceneStore>()(
               state.currentSceneIndex === fromIndex ? toIndex : state.currentSceneIndex,
           };
         }),
-      setBgmFile: (file) => set(() => ({ bgmFile: file })),
-      setFftCache: (cache) => set(() => ({ fftCache: cache })),
-      updateSceneDuration: (id, duration) =>
-        set((state) => {
+  setBgmFile: (file) => set(() => ({ bgmFile: file })),
+  setFftCache: (cache) => set(() => ({ fftCache: cache })),
+  updateSceneDuration: (id, duration) =>
+    set((state) => {
           const scenes = state.scenes.map((scene) =>
             scene.id === id ? { ...scene, duration: clampDuration(duration) } : scene,
           );
@@ -443,15 +440,7 @@ export const useSceneStore = create<SceneStore>()(
             currentFrame: clampFrame(state.currentFrame, totalFrames),
           };
         }),
-    }),
-    {
-      name: "vkoma-store",
-      partialize: (state) => ({
-        currentProjectId: state.currentProjectId,
-      }),
-    },
-  ),
-);
+}));
 
 // 後方互換: sceneStore → timelineStore へのシム
 export { useTimelineStore } from "./timelineStore";

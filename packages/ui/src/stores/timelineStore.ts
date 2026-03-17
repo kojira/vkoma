@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import {
   type Track,
   type TrackItem,
@@ -27,6 +26,7 @@ interface TimelineStore {
   assets: Asset[];
   bgmFile: File | null;
   fftCache: FftCache | null;
+  saveStatus: "saved" | "saving" | "error";
   addTrack: (type: TrackType, name?: string) => void;
   removeTrack: (id: string) => void;
   updateTrack: (id: string, updates: Partial<Track>) => void;
@@ -43,10 +43,6 @@ interface TimelineStore {
   setCurrentTime: (time: number) => void;
   loadProject: (id: string) => Promise<void>;
   saveProject: () => Promise<void>;
-}
-
-interface PersistedTimelineStore {
-  currentProjectId: string | null;
 }
 
 interface ProjectV2Response {
@@ -102,219 +98,218 @@ function createBgmFile(blob: Blob, contentType: string): File {
   return new File([blob], `bgm.${ext}`, { type: contentType });
 }
 
-export const useTimelineStore = create<TimelineStore>()(
-  persist(
-    (set, get) => ({
-      projectId: null,
-      projectName: "",
-      fps: 30,
-      width: 1920,
-      height: 1080,
-      tracks: [],
-      totalDuration: () => getTimelineDuration(get().tracks),
-      isPlaying: false,
-      currentTime: 0,
-      selectedTrackId: null,
-      selectedItemId: null,
-      assets: [],
-      bgmFile: null,
-      fftCache: null,
-      addTrack: (type, name) =>
-        set((state) => {
-          const nextTrackCount = state.tracks.filter((track) => track.type === type).length + 1;
-          const track: Track = {
-            id: createId("track"),
-            type,
-            name: name ?? defaultTrackName(type, nextTrackCount),
-            zOrder: state.tracks.length,
-            muted: false,
-            locked: false,
-            visible: true,
-            items: [],
-          };
+export const useTimelineStore = create<TimelineStore>()((set, get) => ({
+  projectId: null,
+  projectName: "",
+  fps: 30,
+  width: 1920,
+  height: 1080,
+  tracks: [],
+  totalDuration: () => getTimelineDuration(get().tracks),
+  isPlaying: false,
+  currentTime: 0,
+  selectedTrackId: null,
+  selectedItemId: null,
+  assets: [],
+  bgmFile: null,
+  fftCache: null,
+  saveStatus: "saved",
+  addTrack: (type, name) =>
+    set((state) => {
+      const nextTrackCount = state.tracks.filter((track) => track.type === type).length + 1;
+      const track: Track = {
+        id: createId("track"),
+        type,
+        name: name ?? defaultTrackName(type, nextTrackCount),
+        zOrder: state.tracks.length,
+        muted: false,
+        locked: false,
+        visible: true,
+        items: [],
+      };
 
-          return {
-            tracks: [...state.tracks, track],
-            selectedTrackId: track.id,
-          };
-        }),
-      removeTrack: (id) =>
-        set((state) => {
-          const removedTrack = state.tracks.find((track) => track.id === id);
-          const tracks = state.tracks
-            .filter((track) => track.id !== id)
-            .map((track, index) => ({ ...track, zOrder: index }));
-          const selectedItemId =
-            removedTrack?.items.some((item) => item.id === state.selectedItemId) ?? false
-              ? null
-              : state.selectedItemId;
+      return {
+        tracks: [...state.tracks, track],
+        selectedTrackId: track.id,
+      };
+    }),
+  removeTrack: (id) =>
+    set((state) => {
+      const removedTrack = state.tracks.find((track) => track.id === id);
+      const tracks = state.tracks
+        .filter((track) => track.id !== id)
+        .map((track, index) => ({ ...track, zOrder: index }));
+      const selectedItemId =
+        removedTrack?.items.some((item) => item.id === state.selectedItemId) ?? false
+          ? null
+          : state.selectedItemId;
 
-          return {
-            tracks,
-            selectedTrackId: state.selectedTrackId === id ? null : state.selectedTrackId,
-            selectedItemId,
-          };
-        }),
-      updateTrack: (id, updates) =>
-        set((state) => ({
-          tracks: state.tracks.map((track) =>
-            track.id === id
-              ? {
-                  ...track,
-                  ...updates,
-                  id: track.id,
-                  items: updates.items ?? track.items,
-                }
-              : track,
-          ),
-        })),
-      reorderTracks: (fromIndex, toIndex) =>
-        set((state) => {
-          if (
-            fromIndex === toIndex ||
-            fromIndex < 0 ||
-            toIndex < 0 ||
-            fromIndex >= state.tracks.length ||
-            toIndex >= state.tracks.length
-          ) {
-            return state;
-          }
-
-          const tracks = [...state.tracks];
-          const [movedTrack] = tracks.splice(fromIndex, 1);
-          tracks.splice(toIndex, 0, movedTrack);
-
-          return {
-            tracks: tracks.map((track, index) => ({ ...track, zOrder: index })),
-          };
-        }),
-      addItem: (trackId, item) =>
-        set((state) => ({
-          tracks: state.tracks.map((track) =>
-            track.id === trackId
-              ? {
-                  ...track,
-                  items: [...track.items, { ...item, id: createId("item"), trackId }],
-                }
-              : track,
-          ),
-          selectedTrackId: trackId,
-        })),
-      removeItem: (trackId, itemId) =>
-        set((state) => ({
-          tracks: state.tracks.map((track) =>
-            track.id === trackId
-              ? {
-                  ...track,
-                  items: track.items.filter((item) => item.id !== itemId),
-                }
-              : track,
-          ),
-          selectedItemId: state.selectedItemId === itemId ? null : state.selectedItemId,
-        })),
-      updateItem: (trackId, itemId, updates) =>
-        set((state) => ({
-          tracks: state.tracks.map((track) =>
-            track.id === trackId
-              ? {
-                  ...track,
-                  items: track.items.map((item) =>
-                    item.id === itemId
-                      ? {
-                          ...item,
-                          ...updates,
-                          id: item.id,
-                          trackId: item.trackId,
-                          params: updates.params ? { ...item.params, ...updates.params } : item.params,
-                          renderCode:
-                            updates.renderCode === undefined ? item.renderCode : updates.renderCode,
-                        }
-                      : item,
-                  ),
-                }
-              : track,
-          ),
-        })),
-      moveItem: (itemId, toTrackId, startTime) =>
-        set((state) => {
-          let foundItem: TrackItem | null = null;
-          const tracksWithoutItem = state.tracks.map((track) => {
-            const item = track.items.find((entry) => entry.id === itemId);
-            if (item) {
-              foundItem = item;
-              return {
-                ...track,
-                items: track.items.filter((entry) => entry.id !== itemId),
-              };
+      return {
+        tracks,
+        selectedTrackId: state.selectedTrackId === id ? null : state.selectedTrackId,
+        selectedItemId,
+      };
+    }),
+  updateTrack: (id, updates) =>
+    set((state) => ({
+      tracks: state.tracks.map((track) =>
+        track.id === id
+          ? {
+              ...track,
+              ...updates,
+              id: track.id,
+              items: updates.items ?? track.items,
             }
+          : track,
+      ),
+    })),
+  reorderTracks: (fromIndex, toIndex) =>
+    set((state) => {
+      if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= state.tracks.length ||
+        toIndex >= state.tracks.length
+      ) {
+        return state;
+      }
 
-            return track;
-          });
+      const tracks = [...state.tracks];
+      const [movedTrack] = tracks.splice(fromIndex, 1);
+      tracks.splice(toIndex, 0, movedTrack);
 
-          if (!foundItem) {
-            return state;
+      return {
+        tracks: tracks.map((track, index) => ({ ...track, zOrder: index })),
+      };
+    }),
+  addItem: (trackId, item) =>
+    set((state) => ({
+      tracks: state.tracks.map((track) =>
+        track.id === trackId
+          ? {
+              ...track,
+              items: [...track.items, { ...item, id: createId("item"), trackId }],
+            }
+          : track,
+      ),
+      selectedTrackId: trackId,
+    })),
+  removeItem: (trackId, itemId) =>
+    set((state) => ({
+      tracks: state.tracks.map((track) =>
+        track.id === trackId
+          ? {
+              ...track,
+              items: track.items.filter((item) => item.id !== itemId),
+            }
+          : track,
+      ),
+      selectedItemId: state.selectedItemId === itemId ? null : state.selectedItemId,
+    })),
+  updateItem: (trackId, itemId, updates) =>
+    set((state) => ({
+      tracks: state.tracks.map((track) =>
+        track.id === trackId
+          ? {
+              ...track,
+              items: track.items.map((item) =>
+                item.id === itemId
+                  ? {
+                      ...item,
+                      ...updates,
+                      id: item.id,
+                      trackId: item.trackId,
+                      params: updates.params ? { ...item.params, ...updates.params } : item.params,
+                      renderCode:
+                        updates.renderCode === undefined ? item.renderCode : updates.renderCode,
+                    }
+                  : item,
+              ),
+            }
+          : track,
+      ),
+    })),
+  moveItem: (itemId, toTrackId, startTime) =>
+    set((state) => {
+      let foundItem: TrackItem | null = null;
+      const tracksWithoutItem = state.tracks.map((track) => {
+        const item = track.items.find((entry) => entry.id === itemId);
+        if (item) {
+          foundItem = item;
+          return {
+            ...track,
+            items: track.items.filter((entry) => entry.id !== itemId),
+          };
+        }
+
+        return track;
+      });
+
+      if (!foundItem) {
+        return state;
+      }
+
+      const sourceItem = foundItem as TrackItem;
+      const movedItem: TrackItem = {
+        id: sourceItem.id,
+        trackId: toTrackId,
+        duration: sourceItem.duration,
+        sceneConfigId: sourceItem.sceneConfigId,
+        assetId: sourceItem.assetId,
+        params: sourceItem.params,
+        transitionIn: sourceItem.transitionIn,
+        transitionOut: sourceItem.transitionOut,
+        keyframes: sourceItem.keyframes,
+        renderCode: sourceItem.renderCode,
+        startTime: clampTime(startTime),
+      };
+
+      return {
+        tracks: tracksWithoutItem.map((track) =>
+          track.id === toTrackId
+            ? {
+                ...track,
+                items: [...track.items, movedItem],
+              }
+            : track,
+        ),
+        selectedTrackId: toTrackId,
+      };
+    }),
+  updateItemParam: (itemId, key, value) =>
+    set((state) => ({
+      tracks: state.tracks.map((track) => ({
+        ...track,
+        items: track.items.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                params: {
+                  ...item.params,
+                  [key]: value,
+                },
+              }
+            : item,
+        ),
+      })),
+    })),
+  setTransition: (itemId, direction, config) =>
+    set((state) => ({
+      tracks: state.tracks.map((track) => ({
+        ...track,
+        items: track.items.map((item) => {
+          if (item.id !== itemId) {
+            return item;
           }
 
-          const sourceItem = foundItem as TrackItem;
-          const movedItem: TrackItem = {
-            id: sourceItem.id,
-            trackId: toTrackId,
-            duration: sourceItem.duration,
-            sceneConfigId: sourceItem.sceneConfigId,
-            assetId: sourceItem.assetId,
-            params: sourceItem.params,
-            transitionIn: sourceItem.transitionIn,
-            transitionOut: sourceItem.transitionOut,
-            keyframes: sourceItem.keyframes,
-            renderCode: sourceItem.renderCode,
-            startTime: clampTime(startTime),
-          };
-
-          return {
-            tracks: tracksWithoutItem.map((track) =>
-              track.id === toTrackId
-                ? {
-                    ...track,
-                    items: [...track.items, movedItem],
-                  }
-                : track,
-            ),
-            selectedTrackId: toTrackId,
-          };
+          return direction === "in"
+            ? { ...item, transitionIn: config ?? undefined }
+            : { ...item, transitionOut: config ?? undefined };
         }),
-      updateItemParam: (itemId, key, value) =>
-        set((state) => ({
-          tracks: state.tracks.map((track) => ({
-            ...track,
-            items: track.items.map((item) =>
-              item.id === itemId
-                ? {
-                    ...item,
-                    params: {
-                      ...item.params,
-                      [key]: value,
-                    },
-                  }
-                : item,
-            ),
-          })),
-        })),
-      setTransition: (itemId, direction, config) =>
-        set((state) => ({
-          tracks: state.tracks.map((track) => ({
-            ...track,
-            items: track.items.map((item) => {
-              if (item.id !== itemId) {
-                return item;
-              }
-
-              return direction === "in"
-                ? { ...item, transitionIn: config ?? undefined }
-                : { ...item, transitionOut: config ?? undefined };
-            }),
-          })),
-        })),
-      uploadAsset: async (file) => {
+      })),
+    })),
+  uploadAsset: async (file) => {
         const { projectId } = get();
         if (!projectId) {
           throw new Error("Cannot upload asset without projectId");
@@ -342,16 +337,16 @@ export const useTimelineStore = create<TimelineStore>()(
 
         return data.asset;
       },
-      removeAsset: (assetId) =>
-        set((state) => ({
-          assets: state.assets.filter((asset) => asset.id !== assetId),
-        })),
-      setPlaying: (isPlaying) => set(() => ({ isPlaying })),
-      setCurrentTime: (time) =>
-        set(() => ({
-          currentTime: clampTime(time),
-        })),
-      loadProject: async (id) => {
+  removeAsset: (assetId) =>
+    set((state) => ({
+      assets: state.assets.filter((asset) => asset.id !== assetId),
+    })),
+  setPlaying: (isPlaying) => set(() => ({ isPlaying })),
+  setCurrentTime: (time) =>
+    set(() => ({
+      currentTime: clampTime(time),
+    })),
+  loadProject: async (id) => {
         const response = await fetch(`/api/projects/${id}`);
         if (!response.ok) {
           throw new Error("Failed to load project");
@@ -388,6 +383,7 @@ export const useTimelineStore = create<TimelineStore>()(
           assets: Array.isArray(assetsData.assets) ? assetsData.assets : [],
           bgmFile: null,
           fftCache: null,
+          saveStatus: "saved",
           isPlaying: false,
           currentTime: 0,
           selectedTrackId: null,
@@ -417,7 +413,7 @@ export const useTimelineStore = create<TimelineStore>()(
           set(() => ({ fftCache: null }));
         }
       },
-      saveProject: async () => {
+  saveProject: async () => {
         const { projectId, projectName, tracks, assets } = get();
         if (!projectId) {
           return;
@@ -438,20 +434,98 @@ export const useTimelineStore = create<TimelineStore>()(
           throw new Error("Failed to save project");
         }
       },
-    }),
-    {
-      name: "vkoma-timeline-store",
-      partialize: (state): PersistedTimelineStore => ({
-        currentProjectId: state.projectId,
-      }),
-      merge: (persistedState, currentState) => {
-        const persisted = persistedState as PersistedTimelineStore | undefined;
+}));
 
-        return {
-          ...currentState,
-          projectId: persisted?.currentProjectId ?? currentState.projectId,
-        };
-      },
+let lastSavedProjectId: string | null = null;
+let lastSavedTracksSnapshot = JSON.stringify(useTimelineStore.getState().tracks);
+let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function syncAutoSaveBaseline(projectId: string | null, tracks: Track[]): void {
+  lastSavedProjectId = projectId;
+  lastSavedTracksSnapshot = JSON.stringify(tracks);
+}
+
+async function patchTimeline(projectId: string, tracks: Track[]): Promise<void> {
+  const duration = getTimelineDuration(tracks);
+  const response = await fetch(`/api/projects/${projectId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
     },
-  ),
-);
+    body: JSON.stringify({
+      timeline: {
+        tracks,
+        duration,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to auto-save timeline");
+  }
+}
+
+function scheduleTimelineSave(): void {
+  if (retryTimeout) {
+    clearTimeout(retryTimeout);
+    retryTimeout = null;
+  }
+
+  if (saveTimeout) {
+    clearTimeout(saveTimeout);
+  }
+
+  saveTimeout = setTimeout(() => {
+    void runTimelineSave();
+  }, 500);
+}
+
+async function runTimelineSave(isRetry = false): Promise<void> {
+  const { projectId, tracks } = useTimelineStore.getState();
+  const tracksSnapshot = JSON.stringify(tracks);
+
+  if (!projectId) {
+    syncAutoSaveBaseline(null, tracks);
+    return;
+  }
+
+  if (!isRetry && lastSavedProjectId === projectId && tracksSnapshot === lastSavedTracksSnapshot) {
+    return;
+  }
+
+  useTimelineStore.setState({ saveStatus: "saving" });
+
+  try {
+    await patchTimeline(projectId, tracks);
+    if (retryTimeout) {
+      clearTimeout(retryTimeout);
+      retryTimeout = null;
+    }
+    syncAutoSaveBaseline(projectId, tracks);
+    useTimelineStore.setState({ saveStatus: "saved" });
+  } catch (error) {
+    console.error("Timeline auto-save failed:", error);
+    useTimelineStore.setState({ saveStatus: "error" });
+
+    if (!isRetry) {
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+      }
+
+      retryTimeout = setTimeout(() => {
+        void runTimelineSave(true);
+      }, 2000);
+    }
+  }
+}
+
+useTimelineStore.subscribe((state, prevState) => {
+  if (state.projectId !== prevState.projectId) {
+    syncAutoSaveBaseline(state.projectId, state.tracks);
+  }
+
+  if (state.tracks !== prevState.tracks) {
+    scheduleTimelineSave();
+  }
+});

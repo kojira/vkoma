@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
 import { useSceneStore, allScenePresets } from "../stores/sceneStore";
 import { useTimelineStore } from "../stores/timelineStore";
 import { useChatStore } from "../stores/chatStore";
@@ -239,15 +239,31 @@ function renderMessageContent(content: string) {
 export function ChatPanel() {
   const messages = useChatStore((state) => state.messages);
   const sessionId = useChatStore((state) => state.sessionId);
+  const loadedProjectId = useChatStore((state) => state.loadedProjectId);
   const addMessage = useChatStore((state) => state.addMessage);
   const updateMessage = useChatStore((state) => state.updateMessage);
   const clearMessages = useChatStore((state) => state.clearMessages);
   const resetSession = useChatStore((state) => state.resetSession);
+  const loadFromServer = useChatStore((state) => state.loadFromServer);
+  const saveToServer = useChatStore((state) => state.saveToServer);
+  const sceneProjectId = useSceneStore((state) => state.currentProjectId);
+  const timelineProjectId = useTimelineStore((state) => state.projectId);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const projectId = timelineProjectId ?? sceneProjectId;
 
   const canSend = useMemo(() => input.trim().length > 0 && !isSending, [input, isSending]);
+
+  useEffect(() => {
+    if (!projectId || loadedProjectId === projectId) {
+      return;
+    }
+
+    loadFromServer(projectId).catch((error) => {
+      console.error("Failed to load chat history:", error);
+    });
+  }, [loadedProjectId, loadFromServer, projectId]);
 
   const applyGeneratedScenes = async (scenes: GeneratedScene[]) => {
     if (scenes.length === 0) {
@@ -400,10 +416,9 @@ export function ChatPanel() {
     const streamingMsgId = createMessageId("assistant");
     setStreamingMessageId(streamingMsgId);
     addMessage({ id: streamingMsgId, role: "assistant", content: "" });
+    let shouldPersistChat = false;
 
     try {
-      const projectId =
-        useTimelineStore.getState().projectId ?? useSceneStore.getState().currentProjectId;
       const assets = useTimelineStore.getState().assets;
       const assetInfo = assets.map((asset) => ({
         id: asset.id,
@@ -429,6 +444,7 @@ export function ChatPanel() {
         return;
       }
 
+      shouldPersistChat = Boolean(projectId);
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -507,6 +523,11 @@ export function ChatPanel() {
         `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
     } finally {
+      if (shouldPersistChat && projectId) {
+        saveToServer(projectId).catch((error) => {
+          console.error("Failed to save chat history:", error);
+        });
+      }
       setStreamingMessageId(null);
       setIsSending(false);
     }
