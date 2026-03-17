@@ -515,30 +515,30 @@ export function ChatPanel() {
   }, [fontSize]);
 
   return (
-    <aside className="flex h-[24rem] w-full min-w-0 flex-col rounded-xl border border-gray-800 bg-[#141625] lg:h-full lg:w-80">
-      <div className="border-b border-gray-800 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
+    <aside className="flex h-full w-full min-w-0 flex-col rounded-xl border border-gray-800 bg-[#141625] pb-12 lg:h-full lg:w-80 md:pb-0">
+      <div className="border-b border-gray-800 px-3 py-2 lg:px-4 lg:py-3">
+        <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-gray-300">AI Terminal</h2>
-            <p className="mt-1 text-xs text-gray-500">
+            <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-300 lg:text-sm">AI Terminal</h2>
+            <p className="mt-1 hidden text-xs text-gray-500 lg:block">
               {status === "connected" ? "Connected" : status === "connecting" ? "Connecting..." : "Disconnected"}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 rounded-md border border-gray-800 bg-[#141625] p-1">
+            <div className="flex items-center gap-1 rounded-md border border-gray-800 bg-[#141625] p-0.5 lg:p-1">
               <button
                 type="button"
                 onClick={() => changeFontSize(-1)}
-                className="flex min-h-[32px] w-8 items-center justify-center rounded border border-gray-700 text-sm text-gray-300 transition hover:border-gray-500 hover:text-white"
+                className="flex min-h-[28px] w-7 items-center justify-center rounded border border-gray-700 text-xs text-gray-300 transition hover:border-gray-500 hover:text-white lg:min-h-[32px] lg:w-8 lg:text-sm"
                 aria-label="Decrease terminal font size"
               >
                 -
               </button>
-              <span className="min-w-8 text-center text-xs text-gray-400">{fontSize}</span>
+              <span className="min-w-7 text-center text-[10px] text-gray-400 lg:min-w-8 lg:text-xs">{fontSize}</span>
               <button
                 type="button"
                 onClick={() => changeFontSize(1)}
-                className="flex min-h-[32px] w-8 items-center justify-center rounded border border-gray-700 text-sm text-gray-300 transition hover:border-gray-500 hover:text-white"
+                className="flex min-h-[28px] w-7 items-center justify-center rounded border border-gray-700 text-xs text-gray-300 transition hover:border-gray-500 hover:text-white lg:min-h-[32px] lg:w-8 lg:text-sm"
                 aria-label="Increase terminal font size"
               >
                 +
@@ -552,19 +552,21 @@ export function ChatPanel() {
                 writeSessionId(null);
                 setResetCounter((value) => value + 1);
               }}
-              className="rounded-md border border-gray-700 px-2.5 py-1 text-xs font-medium text-gray-300 transition hover:border-gray-500 hover:text-white"
+              className="rounded-md border border-gray-700 px-2 py-0.5 text-[10px] font-medium text-gray-300 transition hover:border-gray-500 hover:text-white lg:px-2.5 lg:py-1 lg:text-xs"
             >
               New Chat
             </button>
           </div>
         </div>
       </div>
-      <div className="min-h-0 flex-1 p-2 pb-[calc(env(safe-area-inset-bottom,0px)+14rem)] lg:pb-2">
+      <div className="flex-1 min-h-0 overflow-hidden p-2">
         <div
           ref={containerRef}
           className="h-full w-full overflow-hidden rounded-lg border border-gray-900/80 bg-[#141625] p-2"
         />
-        <div className="mt-2 flex items-center gap-2 rounded-lg border border-gray-800 bg-[#141625] p-2">
+      </div>
+      <div className="flex-shrink-0 p-1.5 md:hidden">
+        <div className="flex items-center gap-1.5 rounded-lg border border-gray-800 bg-[#141625] p-1.5">
           <input
             type="text"
             value={imeValue}
@@ -580,62 +582,57 @@ export function ChatPanel() {
             autoComplete="off"
             autoCapitalize="off"
             spellCheck={false}
-            className="min-h-[36px] flex-1 rounded-md border border-gray-800 bg-[#1a1d31] px-3 text-xs text-gray-200 outline-none transition focus:border-[#7dd3fc]/50 focus:ring-2 focus:ring-[#7dd3fc]/15"
+            className="min-h-[32px] flex-1 rounded-md border border-gray-800 bg-[#1a1d31] px-2 text-xs text-gray-200 outline-none transition focus:border-[#7dd3fc]/50 focus:ring-2 focus:ring-[#7dd3fc]/15"
           />
           <button
             type="button"
             onClick={sendImeInput}
-            className="min-h-[36px] rounded-md bg-[#7dd3fc] px-4 text-xs font-medium text-[#08111d] transition hover:brightness-105 active:translate-y-px"
+            className="min-h-[32px] rounded-md bg-[#7dd3fc] px-3 text-xs font-medium text-[#08111d] transition hover:brightness-105 active:translate-y-px"
           >
             Send
           </button>
         </div>
       </div>
-      <div className="fixed inset-x-0 bottom-[56px] z-10 grid grid-rows-2 gap-1 border-t border-gray-800 bg-[#141625]/90 p-2 pb-2 backdrop-blur md:hidden">
-        {MOBILE_CONTROL_KEYS.map((row, rowIndex) => (
-          <div
-            key={rowIndex}
-            className={rowIndex === 0 ? "grid grid-cols-6 gap-1" : "grid grid-cols-8 gap-1"}
-          >
-            {row.map((button) => {
-              const isShift = button.id === "shift";
-              const isCtrl = button.id === "ctrl";
-              const isActive = (isShift && shiftActive) || (isCtrl && ctrlActive);
+      <div className="flex-shrink-0 border-t border-gray-800 bg-[#141625] p-1.5 md:hidden">
+        <div className="flex gap-1 overflow-x-auto">
+          {MOBILE_CONTROL_KEYS.flat().map((button) => {
+            const isShift = button.id === "shift";
+            const isCtrl = button.id === "ctrl";
+            const isActive = (isShift && shiftActive) || (isCtrl && ctrlActive);
 
-              return (
-                <button
-                  key={button.id}
-                  type="button"
-                  onClick={() => {
-                    if (isShift) {
-                      setShiftActive((value) => !value);
-                      return;
-                    }
-                    if (isCtrl) {
-                      setCtrlActive((value) => !value);
-                      return;
-                    }
-                    sendControlKey(button.id);
-                  }}
-                  className={[
-                    "min-h-[36px] rounded-xl border border-gray-800 bg-white/5 text-xs text-gray-300 transition active:bg-white/10",
-                    "touch-manipulation",
-                    isShift && isActive
-                      ? "border-[rgba(125,211,252,0.5)] bg-[rgba(125,211,252,0.25)] text-[#7dd3fc]"
-                      : "",
-                    isCtrl && isActive
-                      ? "border-[rgba(126,231,135,0.5)] bg-[rgba(126,231,135,0.25)] text-[#7ee787]"
-                      : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                >
-                  {button.label}
-                </button>
-              );
-            })}
-          </div>
-        ))}
+            return (
+              <button
+                key={button.id}
+                type="button"
+                onClick={() => {
+                  if (isShift) {
+                    setShiftActive((value) => !value);
+                    return;
+                  }
+                  if (isCtrl) {
+                    setCtrlActive((value) => !value);
+                    return;
+                  }
+                  sendControlKey(button.id);
+                }}
+                className={[
+                  "min-h-[28px] flex-shrink-0 rounded-lg border border-gray-800 bg-white/5 px-2 py-0.5 text-[10px] text-gray-300 transition active:bg-white/10",
+                  "touch-manipulation",
+                  isShift && isActive
+                    ? "border-[rgba(125,211,252,0.5)] bg-[rgba(125,211,252,0.25)] text-[#7dd3fc]"
+                    : "",
+                  isCtrl && isActive
+                    ? "border-[rgba(126,231,135,0.5)] bg-[rgba(126,231,135,0.25)] text-[#7ee787]"
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                {button.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </aside>
   );
