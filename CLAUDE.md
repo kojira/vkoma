@@ -558,3 +558,44 @@ function easeOutBounce(t) {
 - [ ] キャンバスサイズを `ctx.canvas.width/height` で取得しているか
 - [ ] フォント指定にフォールバックを含めているか
 - [ ] time（秒）を正しく使ってアニメーションしているか
+
+## FFT / イコライザー / 音声連動
+
+BGM付きプロジェクトでは、レンダリング時に各フレームの音声FFT（周波数スペクトル）データが `params` に自動注入される。
+
+### 利用可能なパラメータ
+- `params.fftBands` — JSON文字列。`JSON.parse()` して使う。8バンドの周波数データ配列 `[{freq, energy}, ...]`
+  - freq: 周波数帯（Hz）
+  - energy: エネルギー値（0〜1）
+- `params.beatIntensity` — ビート強度（0〜1の数値文字列）
+- `params.time` — 現在時刻（秒）
+
+### イコライザーrenderCodeの例
+```javascript
+const w = ctx.canvas.width;
+const h = ctx.canvas.height;
+ctx.fillStyle = '#000';
+ctx.fillRect(0, 0, w, h);
+
+const bands = params.fftBands ? JSON.parse(params.fftBands) : [];
+const barCount = bands.length || 8;
+const barWidth = w / barCount * 0.8;
+const gap = w / barCount * 0.2;
+
+bands.forEach((band, i) => {
+  const barHeight = (band.energy || 0) * h * 0.8;
+  const x = i * (barWidth + gap) + gap / 2;
+  const y = h - barHeight;
+  const hue = (i / barCount) * 360;
+  ctx.fillStyle = `hsl(${hue}, 80%, 60%)`;
+  ctx.fillRect(x, y, barWidth, barHeight);
+});
+```
+
+### プレビュー（ブラウザ）でのFFT
+プレビュー時はWeb Audio API（AnalyserNode）でリアルタイムFFTを取得し、`params.fftBands` に `JSON.stringify()` して渡される。renderCodeはレンダリング時もプレビュー時も同じコードで動く。
+
+### 注意
+- fftBandsは文字列なので必ず `JSON.parse()` する
+- BGMがない場合は `params.fftBands` が undefined になるので、フォールバック必須
+- beatIntensityは全体的なビート感で、パーティクルや光の演出に使える
