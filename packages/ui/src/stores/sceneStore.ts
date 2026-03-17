@@ -78,7 +78,7 @@ function createSceneFromPreset(preset: SceneConfig, index: number): SceneItem {
 }
 
 function createInitialScenes(): SceneItem[] {
-  return allScenePresets.map((preset, index) => createSceneFromPreset(preset, index));
+  return [];
 }
 
 interface SavedSceneLike {
@@ -161,7 +161,7 @@ export function resolveSceneConfig(
 
 function deserializeScenes(rawScenes: unknown): SceneItem[] {
   if (!Array.isArray(rawScenes)) {
-    return createInitialScenes();
+    return [];
   }
 
   const scenes = rawScenes
@@ -203,10 +203,10 @@ function deserializeScenes(rawScenes: unknown): SceneItem[] {
     })
     .filter((scene): scene is SceneItem => scene !== null);
 
-  return scenes.length > 0 ? scenes : createInitialScenes();
+  return scenes;
 }
 
-const initialScenes: SceneItem[] = createInitialScenes();
+const initialScenes: SceneItem[] = [];
 
 export const useSceneStore = create<SceneStore>()((set, get) => ({
   scenes: initialScenes,
@@ -295,7 +295,7 @@ export const useSceneStore = create<SceneStore>()((set, get) => ({
         }
       },
   createProject: async (name) => {
-        const projectScenes = createInitialScenes();
+        const projectScenes: SceneItem[] = [];
         const response = await fetch("/api/projects", {
           method: "POST",
           headers: {
@@ -303,7 +303,7 @@ export const useSceneStore = create<SceneStore>()((set, get) => ({
           },
           body: JSON.stringify({
             name,
-            scenes: serializeScenes(projectScenes),
+            scenes: [],
           }),
         });
 
@@ -332,7 +332,7 @@ export const useSceneStore = create<SceneStore>()((set, get) => ({
     set(() => ({
       currentProjectId: null,
       projectName: "",
-      scenes: createInitialScenes(),
+      scenes: [],
       currentSceneIndex: 0,
       currentFrame: 0,
       isPlaying: false,
@@ -363,17 +363,7 @@ export const useSceneStore = create<SceneStore>()((set, get) => ({
         }),
   removeScene: (id) =>
     set((state) => {
-          if (state.scenes.length <= 1) {
-            return {
-              scenes: state.scenes,
-              currentSceneIndex: 0,
-              currentFrame: 0,
-              isPlaying: false,
-            };
-          }
-
           const scenes = state.scenes.filter((scene) => scene.id !== id);
-          const currentSceneIndex = Math.min(state.currentSceneIndex, scenes.length - 1);
           const totalFrames = scenes.reduce(
             (sum, scene) => sum + Math.max(1, Math.round(scene.duration * state.fps)),
             0,
@@ -381,7 +371,7 @@ export const useSceneStore = create<SceneStore>()((set, get) => ({
 
           return {
             scenes,
-            currentSceneIndex,
+            currentSceneIndex: 0,
             currentFrame: clampFrame(state.currentFrame, totalFrames),
           };
         }),

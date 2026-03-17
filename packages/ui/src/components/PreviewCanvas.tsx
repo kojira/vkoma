@@ -13,6 +13,21 @@ const CANVAS_WIDTH = 1920;
 const CANVAS_HEIGHT = 1080;
 const imageCache = new Map<string, HTMLImageElement>();
 
+function drawCanvasMessage(
+  ctx: CanvasRenderingContext2D,
+  message: string,
+  color: string,
+  font = "24px monospace",
+) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = font;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(message, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+  ctx.restore();
+}
+
 type PreviewCanvasBoundaryProps = {
   children: ReactNode;
 };
@@ -126,6 +141,11 @@ function PreviewCanvasInner() {
       )
       .sort((a, b) => a.zOrder - b.zOrder);
 
+    if (activeVideoItems.length === 0) {
+      drawCanvasMessage(ctx, "No scenes", "#808080");
+      return;
+    }
+
     for (const { item } of activeVideoItems) {
       const localTime = currentTime - item.startTime;
       const params: Record<string, unknown> = {
@@ -155,6 +175,8 @@ function PreviewCanvasInner() {
             drawFn(ctx, params, localTime);
           } catch (error) {
             console.error("Preview renderCode execution failed", error);
+            const message = error instanceof Error ? error.message : "Unknown render error";
+            drawCanvasMessage(ctx, `Error: ${message}`, "#ff0000");
           }
         }
         continue;
@@ -202,7 +224,14 @@ function PreviewCanvasInner() {
       }
 
       offscreenCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      renderScene(scene, offscreenCtx, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
+      try {
+        renderScene(scene, offscreenCtx, CANVAS_WIDTH, CANVAS_HEIGHT, localTime);
+      } catch (error) {
+        console.error("Preview preset rendering failed", error);
+        const message = error instanceof Error ? error.message : "Unknown render error";
+        drawCanvasMessage(ctx, `Error: ${message}`, "#ff0000");
+        continue;
+      }
 
       const bgImagePath = typeof scene.params?.bgImagePath === "string" ? scene.params.bgImagePath : "";
       if (bgImagePath) {
