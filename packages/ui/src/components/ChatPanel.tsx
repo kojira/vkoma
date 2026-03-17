@@ -555,7 +555,7 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
   }, [handleNewChat, newChatNonce]);
 
   return (
-    <aside className="flex h-full w-full min-w-0 flex-col rounded-xl border border-gray-800 bg-[#141625] lg:h-full lg:w-80">
+    <aside className="flex h-full min-h-0 w-full min-w-0 flex-col rounded-xl border border-gray-800 bg-[#141625] lg:h-full lg:w-80">
       <div className="border-b border-gray-800 px-2 py-1.5 lg:px-4 lg:py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">

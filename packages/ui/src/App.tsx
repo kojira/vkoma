@@ -129,9 +129,8 @@ export default function App() {
             id: "terminal",
             title: "🤖 AIターミナル",
             headerClassName: "border-cyan-400 bg-cyan-500/10",
-            contentClassName: "max-h-[60vh]",
             children: (
-              <div className="flex h-full min-h-[300px] flex-col">
+              <div className="flex flex-col" style={{ height: "min(60vh, 500px)" }}>
                 <ChatPanel showNewChatButton={true} />
               </div>
             ),
