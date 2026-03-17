@@ -1,612 +1,304 @@
-import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
-import { useSceneStore, allScenePresets } from "../stores/sceneStore";
-import { useTimelineStore } from "../stores/timelineStore";
-import { useChatStore } from "../stores/chatStore";
-import { defineScene, params as sceneParams, type SceneParam } from "../../../../packages/core/src/index";
+import { useEffect, useRef, useState } from "react";
+import { Terminal } from "xterm";
+import { FitAddon } from "xterm-addon-fit";
+import { WebLinksAddon } from "xterm-addon-web-links";
+import "xterm/css/xterm.css";
 
-type GeneratedScene = {
-  id?: string;
-  name?: string;
-  duration?: number;
-  params?: Record<string, unknown>;
-  code?: string;
-  renderCode?: string;
-};
+const TERMINAL_THEME = {
+  background: "#141625",
+  foreground: "#e6edf7",
+  cursor: "#7dd3fc",
+  cursorAccent: "#141625",
+  selectionBackground: "rgba(125, 211, 252, 0.25)",
+  black: "#141625",
+  red: "#ff7b72",
+  green: "#7ee787",
+  yellow: "#f2cc60",
+  blue: "#79c0ff",
+  magenta: "#d2a8ff",
+  cyan: "#7dd3fc",
+  white: "#e6edf7",
+  brightBlack: "#6e7681",
+  brightRed: "#ffa198",
+  brightGreen: "#56d364",
+  brightYellow: "#e3b341",
+  brightBlue: "#a5d6ff",
+  brightMagenta: "#e2b8ff",
+  brightCyan: "#a5f3fc",
+  brightWhite: "#f0f6fc",
+} as const;
 
-type AudioTrackRequest = {
-  assetId: string;
-  name?: string;
-  startTime?: number;
-  duration?: number;
-  volume?: number;
-};
+const SESSION_QUERY_KEY = "sessionId";
 
-type SSEEvent =
-  | { type: "text"; content: string }
-  | { type: "scenes"; scenes: GeneratedScene[] }
-  | { type: "audioTracks"; audioTracks: AudioTrackRequest[] }
-  | { type: "message"; content: string }
-  | { type: "done" }
-  | { type: "error"; message: string };
-
-function createMessageId(role: "user" | "assistant"): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `${role}-${crypto.randomUUID()}`;
-  }
-
-  return `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+function getTerminalWsUrl() {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/terminal-ws`;
 }
 
-function extractJsonObject(text: string): string | null {
-  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (codeBlockMatch) {
-    return extractJsonObject(codeBlockMatch[1]);
-  }
-
-  let start = -1;
-  let depth = 0;
-  let inString = false;
-  let escaping = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-
-    if (inString) {
-      if (escaping) {
-        escaping = false;
-      } else if (char === "\\") {
-        escaping = true;
-      } else if (char === "\"") {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === "\"") {
-      inString = true;
-      continue;
-    }
-
-    if (char === "{") {
-      if (depth === 0) {
-        start = index;
-      }
-      depth += 1;
-      continue;
-    }
-
-    if (char === "}") {
-      if (depth === 0) {
-        continue;
-      }
-      depth -= 1;
-      if (depth === 0 && start >= 0) {
-        return text.slice(start, index + 1);
-      }
-    }
-  }
-
-  return null;
+function readSessionId() {
+  return new URLSearchParams(window.location.search).get(SESSION_QUERY_KEY);
 }
 
-function decodeJsonStringFragment(value: string): string {
-  try {
-    return JSON.parse(`"${value}"`) as string;
-  } catch {
-    return value
-      .replace(/\\"/g, "\"")
-      .replace(/\\n/g, "\n")
-      .replace(/\\r/g, "\r")
-      .replace(/\\t/g, "\t");
+function writeSessionId(sessionId: string | null) {
+  const url = new URL(window.location.href);
+  if (sessionId) {
+    url.searchParams.set(SESSION_QUERY_KEY, sessionId);
+  } else {
+    url.searchParams.delete(SESSION_QUERY_KEY);
   }
-}
-
-function extractStreamingMessagePreview(rawText: string): string {
-  const jsonText = extractJsonObject(rawText);
-  if (jsonText) {
-    try {
-      const parsed = JSON.parse(jsonText) as { message?: unknown };
-      if (typeof parsed.message === "string") {
-        return parsed.message;
-      }
-    } catch {
-      // Fall through to partial extraction.
-    }
-  }
-
-  const keyIndex = rawText.indexOf("\"message\"");
-  if (keyIndex < 0) {
-    return "";
-  }
-
-  const colonIndex = rawText.indexOf(":", keyIndex);
-  if (colonIndex < 0) {
-    return "";
-  }
-
-  const firstQuoteIndex = rawText.indexOf("\"", colonIndex + 1);
-  if (firstQuoteIndex < 0) {
-    return "";
-  }
-
-  let escaping = false;
-  let value = "";
-  for (let index = firstQuoteIndex + 1; index < rawText.length; index += 1) {
-    const char = rawText[index];
-    if (escaping) {
-      value += `\\${char}`;
-      escaping = false;
-      continue;
-    }
-
-    if (char === "\\") {
-      escaping = true;
-      continue;
-    }
-
-    if (char === "\"") {
-      return decodeJsonStringFragment(value);
-    }
-
-    value += char;
-  }
-
-  return decodeJsonStringFragment(value);
-}
-
-function getStreamingMessagePreview(rawText: string): string {
-  const preview = extractStreamingMessagePreview(rawText).trim();
-  return preview || "考え中...";
-}
-
-function buildCompletionSummary(sceneCount: number, audioTrackCount: number): string {
-  if (sceneCount === 0 && audioTrackCount === 0) {
-    return "";
-  }
-
-  if (sceneCount === 0) {
-    return `✅ ${audioTrackCount}オーディオトラックを追加しました`;
-  }
-
-  let summary = `✅ ${sceneCount}シーンを生成しました`;
-  if (audioTrackCount > 0) {
-    summary += ` + ${audioTrackCount}オーディオトラック`;
-  }
-  return summary;
-}
-
-function renderInlineMarkdown(text: string) {
-  const nodes: ReactNode[] = [];
-  const pattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      nodes.push(
-        <Fragment key={`text-${lastIndex}`}>{text.slice(lastIndex, match.index)}</Fragment>,
-      );
-    }
-
-    const token = match[0];
-    if (token.startsWith("**") && token.endsWith("**")) {
-      nodes.push(<strong key={`bold-${match.index}`}>{token.slice(2, -2)}</strong>);
-    } else if (token.startsWith("`") && token.endsWith("`")) {
-      nodes.push(
-        <code
-          key={`code-${match.index}`}
-          className="rounded bg-black/30 px-1 py-0.5 font-mono text-[0.85em]"
-        >
-          {token.slice(1, -1)}
-        </code>,
-      );
-    }
-
-    lastIndex = match.index + token.length;
-  }
-
-  if (lastIndex < text.length) {
-    nodes.push(<Fragment key={`text-${lastIndex}`}>{text.slice(lastIndex)}</Fragment>);
-  }
-
-  return nodes.length > 0 ? nodes : text;
-}
-
-function renderMessageContent(content: string) {
-  const blocks = content.split(/```/);
-
-  return blocks.map((block, index) => {
-    if (index % 2 === 1) {
-      const normalized = block.replace(/^\w+\n/, "");
-      return (
-        <pre
-          key={`code-block-${index}`}
-          className="mt-2 overflow-x-auto rounded-lg bg-black/30 p-3 text-xs text-gray-100"
-        >
-          <code>{normalized}</code>
-        </pre>
-      );
-    }
-
-    return (
-      <div key={`text-block-${index}`} className="whitespace-pre-wrap">
-        {renderInlineMarkdown(block)}
-      </div>
-    );
-  });
+  window.history.replaceState({}, "", url);
 }
 
 export function ChatPanel() {
-  const messages = useChatStore((state) => state.messages);
-  const sessionId = useChatStore((state) => state.sessionId);
-  const loadedProjectId = useChatStore((state) => state.loadedProjectId);
-  const addMessage = useChatStore((state) => state.addMessage);
-  const updateMessage = useChatStore((state) => state.updateMessage);
-  const clearMessages = useChatStore((state) => state.clearMessages);
-  const resetSession = useChatStore((state) => state.resetSession);
-  const loadFromServer = useChatStore((state) => state.loadFromServer);
-  const saveToServer = useChatStore((state) => state.saveToServer);
-  const sceneProjectId = useSceneStore((state) => state.currentProjectId);
-  const timelineProjectId = useTimelineStore((state) => state.projectId);
-  const [input, setInput] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
-  const projectId = timelineProjectId ?? sceneProjectId;
-
-  const canSend = useMemo(() => input.trim().length > 0 && !isSending, [input, isSending]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const intentionalCloseRef = useRef(false);
+  const sessionIdRef = useRef<string | null>(readSessionId());
+  const compositionRef = useRef(false);
+  const [resetCounter, setResetCounter] = useState(0);
+  const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
 
   useEffect(() => {
-    if (!projectId || loadedProjectId === projectId) {
+    const container = containerRef.current;
+    if (!container) {
       return;
     }
 
-    loadFromServer(projectId).catch((error) => {
-      console.error("Failed to load chat history:", error);
+    const terminal = new Terminal({
+      allowProposedApi: true,
+      convertEol: true,
+      cursorBlink: true,
+      fontFamily: '"JetBrains Mono", "Noto Sans Mono CJK JP", monospace',
+      fontSize: 14,
+      lineHeight: 1.35,
+      theme: TERMINAL_THEME,
     });
-  }, [loadedProjectId, loadFromServer, projectId]);
+    const fitAddon = new FitAddon();
+    const webLinksAddon = new WebLinksAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.loadAddon(webLinksAddon);
+    terminal.open(container);
+    terminalRef.current = terminal;
+    fitAddonRef.current = fitAddon;
 
-  const applyGeneratedScenes = async (scenes: GeneratedScene[]) => {
-    if (scenes.length === 0) {
-      return;
-    }
-
-    const timelineStore = useTimelineStore.getState();
-    let videoTrack = timelineStore.tracks.find((track) => track.type === "video");
-    if (!videoTrack) {
-      timelineStore.addTrack("video", "映像");
-      videoTrack = useTimelineStore.getState().tracks.find((track) => track.type === "video");
-    }
-
-    let nextStartTime = videoTrack?.items.reduce((max, item) => {
-      return Math.max(max, item.startTime + item.duration);
-    }, 0) ?? 0;
-
-    if (videoTrack) {
-      for (const scene of scenes) {
-        const duration = scene.duration ?? 3;
-        const sceneConfigId =
-          scene.code ?? `dynamic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        useTimelineStore.getState().addItem(videoTrack.id, {
-          startTime: nextStartTime,
-          duration,
-          sceneConfigId,
-          params: scene.params ?? {},
-          renderCode: scene.renderCode,
-        });
-        nextStartTime += duration;
+    const clearReconnectTimer = () => {
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
       }
-    }
-
-    const addScene = useSceneStore.getState().addScene;
-
-    const resolveSceneConfig = (scene: GeneratedScene) => {
-      if (scene.code) {
-        const preset = allScenePresets.find((p) => p.id === scene.code);
-        if (preset) return preset;
-      }
-      if (scene.renderCode) {
-        try {
-          const drawFn = new Function("ctx", "params", "time", scene.renderCode) as (
-            ctx: CanvasRenderingContext2D,
-            params: Record<string, unknown>,
-            time: number,
-          ) => void;
-          const defaultParams: Record<string, SceneParam> = {};
-          if (scene.params) {
-            for (const [key, value] of Object.entries(scene.params)) {
-              if (typeof value === "number") {
-                defaultParams[key] = sceneParams.number(key, value);
-              } else if (typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)) {
-                defaultParams[key] = sceneParams.color(key, value);
-              } else if (typeof value === "string") {
-                defaultParams[key] = sceneParams.string(key, value);
-              }
-            }
-          }
-          return defineScene({
-            id: `dynamic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            name: scene.name ?? "Dynamic Scene",
-            duration: scene.duration ?? 3,
-            defaultParams,
-            draw: drawFn,
-          });
-        } catch {
-          return undefined;
-        }
-      }
-      return undefined;
     };
 
-    const store = useSceneStore.getState();
-    for (const scene of store.scenes.slice(1)) {
-      useSceneStore.getState().removeScene(scene.id);
-    }
-
-    const first = scenes[0];
-    if (first) {
-      const firstConfig = resolveSceneConfig(first);
-      useSceneStore.getState().updateScene(store.scenes[0].id, {
-        name: first.name ?? "Scene",
-        duration: first.duration ?? 3,
-        params: first.params ?? {},
-        ...(firstConfig ? { sceneConfig: firstConfig } : {}),
-      });
-    }
-
-    for (const scene of scenes.slice(1)) {
-      const sceneConfig = resolveSceneConfig(scene);
-      addScene({
-        id: scene.id ?? `scene-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        name: scene.name ?? "Scene",
-        duration: scene.duration ?? 3,
-        params: scene.params ?? {},
-        ...(sceneConfig ? { sceneConfig } : {}),
-      });
-    }
-
-    await useTimelineStore.getState().saveProject();
-    await useSceneStore.getState().saveProject();
-  };
-
-  const applyAudioTracks = async (audioTracks: AudioTrackRequest[]) => {
-    if (audioTracks.length === 0) {
-      return;
-    }
-
-    const timelineStore = useTimelineStore.getState();
-    const fallbackDuration = timelineStore.totalDuration();
-
-    for (const trackRequest of audioTracks) {
-      let audioTrack = useTimelineStore.getState().tracks.find((track) => track.type === "audio");
-      if (!audioTrack) {
-        useTimelineStore.getState().addTrack("audio", "オーディオ");
-        audioTrack = useTimelineStore.getState().tracks.find((track) => track.type === "audio");
-      }
-
-      if (!audioTrack || !trackRequest.assetId) {
-        continue;
-      }
-
-      useTimelineStore.getState().addItem(audioTrack.id, {
-        startTime: trackRequest.startTime ?? 0,
-        duration: trackRequest.duration ?? fallbackDuration,
-        assetId: trackRequest.assetId,
-        params: { volume: trackRequest.volume ?? 1.0 },
-      });
-    }
-
-    await useTimelineStore.getState().saveProject();
-  };
-
-  const handleSend = async () => {
-    const value = input.trim();
-    if (!value || isSending) {
-      return;
-    }
-
-    setInput("");
-    setIsSending(true);
-
-    addMessage({
-      id: createMessageId("user"),
-      role: "user",
-      content: value,
-    });
-
-    const streamingMsgId = createMessageId("assistant");
-    setStreamingMessageId(streamingMsgId);
-    addMessage({ id: streamingMsgId, role: "assistant", content: "" });
-    let shouldPersistChat = false;
-
-    try {
-      const assets = useTimelineStore.getState().assets;
-      const assetInfo = assets.map((asset) => ({
-        id: asset.id,
-        name: asset.name,
-        type: asset.type,
-        filename: asset.filename,
-        mimeType: asset.mimeType,
-      }));
-
-      const response = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId,
-          message: value,
-          projectId,
-          assets: assetInfo,
-        }),
-      });
-
-      if (!response.ok || !response.body) {
-        updateMessage(streamingMsgId, "Error: Request failed");
+    const sendResize = () => {
+      const socket = socketRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
         return;
       }
 
-      shouldPersistChat = Boolean(projectId);
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let accumulatedText = "";
-      let finalMessage = "";
-      let generatedScenes: GeneratedScene[] = [];
-      let generatedAudioTracks: AudioTrackRequest[] = [];
-
-      for (;;) {
-        const { done: readerDone, value: chunk } = await reader.read();
-        if (readerDone) break;
-
-        buffer += decoder.decode(chunk, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6);
-          let event: SSEEvent;
-          try {
-            event = JSON.parse(jsonStr);
-          } catch {
-            continue;
-          }
-
-          if (event.type === "text") {
-            accumulatedText += event.content;
-            updateMessage(streamingMsgId, getStreamingMessagePreview(accumulatedText));
-            continue;
-          }
-
-          if (event.type === "scenes") {
-            generatedScenes = event.scenes;
-            try {
-              await applyGeneratedScenes(generatedScenes);
-            } catch (error) {
-              console.error("Failed to apply generated scenes:", error);
-            }
-            continue;
-          }
-
-          if (event.type === "audioTracks") {
-            generatedAudioTracks = event.audioTracks;
-            try {
-              await applyAudioTracks(generatedAudioTracks);
-            } catch (error) {
-              console.error("Failed to apply audio tracks:", error);
-            }
-            continue;
-          }
-
-          if (event.type === "message") {
-            finalMessage = event.content;
-            const summary = buildCompletionSummary(generatedScenes.length, generatedAudioTracks.length);
-            updateMessage(streamingMsgId, [finalMessage, summary].filter(Boolean).join("\n\n"));
-            continue;
-          }
-
-          if (event.type === "error") {
-            updateMessage(streamingMsgId, `Error: ${event.message}`);
-            return;
-          }
-
-          if (event.type === "done") {
-            const preview = getStreamingMessagePreview(accumulatedText);
-            const summary = buildCompletionSummary(generatedScenes.length, generatedAudioTracks.length);
-            const fallbackMessage = finalMessage || preview;
-            updateMessage(streamingMsgId, [fallbackMessage, summary].filter(Boolean).join("\n\n"));
-          }
-        }
-      }
-    } catch (error) {
-      updateMessage(
-        streamingMsgId,
-        `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
+      socket.send(
+        JSON.stringify({
+          type: "resize",
+          cols: terminal.cols,
+          rows: terminal.rows,
+        }),
       );
-    } finally {
-      if (shouldPersistChat && projectId) {
-        saveToServer(projectId).catch((error) => {
-          console.error("Failed to save chat history:", error);
-        });
+    };
+
+    const fitTerminal = () => {
+      fitAddon.fit();
+      sendResize();
+    };
+
+    const scheduleReconnect = () => {
+      if (intentionalCloseRef.current || reconnectTimerRef.current !== null) {
+        return;
       }
-      setStreamingMessageId(null);
-      setIsSending(false);
-    }
-  };
+
+      const delay = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 30_000);
+      reconnectTimerRef.current = window.setTimeout(() => {
+        reconnectTimerRef.current = null;
+        reconnectAttemptsRef.current += 1;
+        connect();
+      }, delay);
+    };
+
+    const handleMessage = (data: string) => {
+      try {
+        const payload = JSON.parse(data) as
+          | { type: "session"; sessionId?: string }
+          | { type: "replay-start" }
+          | { type: "replay-end" }
+          | { type: "exit"; code?: number };
+
+        if (payload.type === "session") {
+          sessionIdRef.current = payload.sessionId ?? null;
+          writeSessionId(sessionIdRef.current);
+          return;
+        }
+
+        if (payload.type === "replay-start") {
+          terminal.clear();
+          return;
+        }
+
+        if (payload.type === "replay-end") {
+          return;
+        }
+
+        if (payload.type === "exit") {
+          intentionalCloseRef.current = true;
+          sessionIdRef.current = null;
+          writeSessionId(null);
+          setStatus("disconnected");
+          terminal.writeln("");
+          terminal.writeln(`Process exited${typeof payload.code === "number" ? ` (${payload.code})` : ""}.`);
+          return;
+        }
+      } catch {
+        terminal.write(data);
+      }
+    };
+
+    const connect = () => {
+      if (
+        socketRef.current &&
+        (socketRef.current.readyState === WebSocket.OPEN ||
+          socketRef.current.readyState === WebSocket.CONNECTING)
+      ) {
+        return;
+      }
+
+      clearReconnectTimer();
+      intentionalCloseRef.current = false;
+      setStatus("connecting");
+
+      const url = new URL(getTerminalWsUrl());
+      if (sessionIdRef.current) {
+        url.searchParams.set(SESSION_QUERY_KEY, sessionIdRef.current);
+      }
+
+      const socket = new WebSocket(url);
+      socketRef.current = socket;
+
+      socket.addEventListener("open", () => {
+        reconnectAttemptsRef.current = 0;
+        setStatus("connected");
+        requestAnimationFrame(() => fitTerminal());
+      });
+
+      socket.addEventListener("message", (event) => {
+        if (typeof event.data === "string") {
+          handleMessage(event.data);
+        }
+      });
+
+      socket.addEventListener("close", () => {
+        if (socketRef.current === socket) {
+          socketRef.current = null;
+        }
+        setStatus("disconnected");
+        if (!intentionalCloseRef.current) {
+          scheduleReconnect();
+        }
+      });
+
+      socket.addEventListener("error", () => {
+        setStatus("disconnected");
+      });
+    };
+
+    terminal.onData((data) => {
+      if (compositionRef.current) {
+        return;
+      }
+
+      const socket = socketRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      socket.send(data);
+    });
+
+    const compositionContainer = container.querySelector(".xterm-helper-textarea");
+    const handleCompositionStart = () => {
+      compositionRef.current = true;
+    };
+    const handleCompositionEnd = () => {
+      compositionRef.current = false;
+    };
+
+    compositionContainer?.addEventListener("compositionstart", handleCompositionStart);
+    compositionContainer?.addEventListener("compositionend", handleCompositionEnd);
+
+    resizeObserverRef.current = new ResizeObserver(() => {
+      fitTerminal();
+    });
+    resizeObserverRef.current.observe(container);
+
+    const handleWindowResize = () => fitTerminal();
+    window.addEventListener("resize", handleWindowResize);
+
+    requestAnimationFrame(() => {
+      fitTerminal();
+      connect();
+    });
+
+    return () => {
+      intentionalCloseRef.current = true;
+      clearReconnectTimer();
+      writeSessionId(sessionIdRef.current);
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
+      window.removeEventListener("resize", handleWindowResize);
+      compositionContainer?.removeEventListener("compositionstart", handleCompositionStart);
+      compositionContainer?.removeEventListener("compositionend", handleCompositionEnd);
+
+      const socket = socketRef.current;
+      socketRef.current = null;
+      if (socket) {
+        socket.close();
+      }
+
+      fitAddonRef.current = null;
+      terminalRef.current = null;
+      terminal.dispose();
+    };
+  }, [resetCounter]);
 
   return (
-    <aside className="flex h-[24rem] w-full flex-col rounded-xl border border-gray-800 bg-gray-950 lg:h-full lg:w-80">
+    <aside className="flex h-[24rem] w-full min-w-0 flex-col rounded-xl border border-gray-800 bg-[#141625] lg:h-full lg:w-80">
       <div className="border-b border-gray-800 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-gray-300">
-            AI Chat
-          </h2>
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-gray-300">AI Terminal</h2>
+            <p className="mt-1 text-xs text-gray-500">
+              {status === "connected" ? "Connected" : status === "connecting" ? "Connecting..." : "Disconnected"}
+            </p>
+          </div>
           <button
             type="button"
             onClick={() => {
-              clearMessages();
-              resetSession();
+              intentionalCloseRef.current = true;
+              sessionIdRef.current = null;
+              writeSessionId(null);
+              setResetCounter((value) => value + 1);
             }}
-            disabled={isSending}
-            className="rounded-md border border-gray-700 px-2.5 py-1 text-xs font-medium text-gray-300 transition hover:border-gray-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md border border-gray-700 px-2.5 py-1 text-xs font-medium text-gray-300 transition hover:border-gray-500 hover:text-white"
           >
             New Chat
           </button>
         </div>
       </div>
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={
-              message.role === "user"
-                ? "ml-auto max-w-[85%] rounded-2xl rounded-br-sm bg-blue-500 px-3 py-2 text-sm text-white"
-                : message.content.startsWith("Error:")
-                  ? "max-w-[85%] rounded-2xl rounded-bl-sm border border-red-500/30 bg-red-900/50 px-3 py-2 text-sm text-red-300"
-                  : "max-w-[85%] rounded-2xl rounded-bl-sm bg-gray-800 px-3 py-2 text-sm text-gray-100"
-            }
-          >
-            {message.id === streamingMessageId ? (
-              <div className="flex items-start gap-2">
-                <svg className="h-3.5 w-3.5 animate-spin flex-shrink-0" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                <div className="min-w-0 break-words">
-                  {renderMessageContent(message.content || "考え中...")}
-                </div>
-              </div>
-            ) : message.content.startsWith("Error:") ? (
-              <span className="flex items-center gap-1.5">⚠️ {message.content}</span>
-            ) : (
-              <div className="break-words">{renderMessageContent(message.content)}</div>
-            )}
-          </div>
-        ))}
-      </div>
-      <div className="border-t border-gray-800 p-4">
-        <div className="flex gap-2">
-          <input
-            data-testid="chat-input"
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                void handleSend();
-              }
-            }}
-            placeholder="Ask AI to generate a scene..."
-            className="flex-1 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white outline-none placeholder:text-gray-500"
-          />
-          <button
-            data-testid="chat-send"
-            type="button"
-            onClick={() => void handleSend()}
-            disabled={!canSend}
-            className="rounded-md bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:bg-gray-700"
-          >
-            {isSending ? "生成中..." : "Send"}
-          </button>
-        </div>
+      <div className="min-h-0 flex-1 p-2">
+        <div
+          ref={containerRef}
+          className="h-full w-full overflow-hidden rounded-lg border border-gray-900/80 bg-[#141625] p-2"
+        />
       </div>
     </aside>
   );

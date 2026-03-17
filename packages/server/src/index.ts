@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import fs from "node:fs";
 import crypto from "node:crypto";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { createReadStream } from "node:fs";
@@ -29,6 +30,9 @@ import { createAudioAnalyzer } from '../../audio/src/index.js';
 import { handleAiChat } from "./ai-chat.js";
 import { renderFrameWithTracks } from "./render-frame.js";
 import { WorkerPool } from "./workerPool.js";
+
+const require = createRequire(import.meta.url);
+const { createChatServer } = require("/Volumes/2TB/openclaw/workspace/projects/cli-chat-poc/src/server.js");
 
 process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EPIPE') {
@@ -1429,7 +1433,7 @@ app.post("/api/settings", async (c) => {
 
 const port = 3001;
 
-serve(
+const server = serve(
   {
     fetch: app.fetch,
     port,
@@ -1438,3 +1442,9 @@ serve(
     console.log(`vKoma server listening on http://localhost:${port}`);
   },
 );
+
+createChatServer(server, {
+  path: "/terminal-ws",
+  provider: process.env.AI_PROVIDER || "claude",
+  cwd: process.env.VKOMA_PROJECTS_DIR || path.join(os.homedir(), "vkoma-projects"),
+});
