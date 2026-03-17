@@ -1448,4 +1448,28 @@ createChatServer(server, {
   provider: process.env.AI_PROVIDER || "claude",
   cwd: projectsRoot,
   env: { ...process.env, PATH: process.env.PATH + ":/usr/local/bin:/Users/kojira/.local/bin" },
+  getSystemPrompt: async (searchParams: URLSearchParams) => {
+    const projectId = searchParams.get("projectId");
+    if (!projectId) return undefined;
+    try {
+      const project = await readProject(projectId);
+      const sceneCount = Array.isArray(project.scenes) ? project.scenes.length : 0;
+      const trackCount = project.timeline?.tracks?.length ?? 0;
+      const duration = project.timeline?.duration ?? 0;
+      return [
+        `## 現在のvKomaプロジェクト`,
+        `- プロジェクト名: ${project.name}`,
+        `- プロジェクトID: ${projectId}`,
+        `- シーン数: ${sceneCount}`,
+        `- トラック数: ${trackCount}`,
+        `- 全体の長さ: ${duration}秒`,
+        `- API Base: http://localhost:3001/api/projects/${projectId}`,
+        ``,
+        `プロジェクトの操作にはcurlでAPIを叩いてください。`,
+        `例: curl http://localhost:3001/api/projects/${projectId} | jq`,
+      ].join("\n");
+    } catch {
+      return undefined;
+    }
+  },
 });

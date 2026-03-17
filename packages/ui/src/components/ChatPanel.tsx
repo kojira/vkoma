@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "xterm";
+import { useTimelineStore } from "../stores/timelineStore";
 import { FitAddon } from "xterm-addon-fit";
 import { WebLinksAddon } from "xterm-addon-web-links";
 import "xterm/css/xterm.css";
@@ -83,9 +84,13 @@ function getDefaultFontSize() {
   return window.innerWidth <= 768 ? 12 : 14;
 }
 
-function getTerminalWsUrl() {
+function getTerminalWsUrl(projectId: string | null) {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/terminal-ws`;
+  const base = `${protocol}//${window.location.host}/terminal-ws`;
+  if (projectId) {
+    return `${base}?projectId=${encodeURIComponent(projectId)}`;
+  }
+  return base;
 }
 
 function readSessionId() {
@@ -122,6 +127,8 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
   const hasSavedFontSizeRef = useRef(
     typeof window !== "undefined" ? window.localStorage.getItem(FONT_SIZE_STORAGE_KEY) !== null : false,
   );
+  const projectId = useTimelineStore((s) => s.projectId);
+  const projectIdRef = useRef(projectId);
   const [resetCounter, setResetCounter] = useState(0);
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
   const [imeValue, setImeValue] = useState("");
@@ -385,7 +392,7 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
       intentionalCloseRef.current = false;
       setStatus("connecting");
 
-      const url = new URL(getTerminalWsUrl());
+      const url = new URL(getTerminalWsUrl(projectIdRef.current));
       if (sessionIdRef.current) {
         url.searchParams.set(SESSION_QUERY_KEY, sessionIdRef.current);
       }
@@ -544,6 +551,15 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
       }
     }
   }, [fontSize]);
+
+  useEffect(() => {
+    if (projectIdRef.current === projectId) return;
+    projectIdRef.current = projectId;
+    intentionalCloseRef.current = true;
+    sessionIdRef.current = null;
+    writeSessionId(null);
+    setResetCounter((v) => v + 1);
+  }, [projectId]);
 
   useEffect(() => {
     if (previousNewChatNonceRef.current === newChatNonce) {
