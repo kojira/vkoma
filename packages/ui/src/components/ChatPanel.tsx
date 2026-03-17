@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import { WebLinksAddon } from "xterm-addon-web-links";
@@ -29,6 +29,59 @@ const TERMINAL_THEME = {
 } as const;
 
 const SESSION_QUERY_KEY = "sessionId";
+const FONT_SIZE_STORAGE_KEY = "vkoma-terminal-font-size";
+const FONT_SIZE_MIN = 8;
+const FONT_SIZE_MAX = 24;
+
+const MOBILE_CONTROL_KEYS = [
+  [
+    { id: "shift", label: "⇧" },
+    { id: "ctrl", label: "Ctrl" },
+    { id: "enter", label: "Enter" },
+    { id: "tab", label: "Tab" },
+    { id: "esc", label: "Esc" },
+    { id: "ctrl-c", label: "Ctrl+C" },
+  ],
+  [
+    { id: "pgup", label: "PgUp" },
+    { id: "left", label: "←" },
+    { id: "up", label: "↑" },
+    { id: "down", label: "↓" },
+    { id: "right", label: "→" },
+    { id: "pgdn", label: "PgDn" },
+    { id: "y", label: "Y" },
+    { id: "n", label: "N" },
+  ],
+] as const;
+
+const MOBILE_CONTROL_KEY_MAP: Record<string, string> = {
+  enter: "\r",
+  tab: "\t",
+  esc: "\x1b",
+  "ctrl-c": "\x03",
+  left: "\x1b[D",
+  up: "\x1b[A",
+  down: "\x1b[B",
+  right: "\x1b[C",
+  y: "y",
+  n: "n",
+};
+
+function getDefaultFontSize() {
+  if (typeof window === "undefined") {
+    return 14;
+  }
+
+  const saved = window.localStorage.getItem(FONT_SIZE_STORAGE_KEY);
+  if (saved) {
+    const parsed = Number.parseInt(saved, 10);
+    if (parsed >= FONT_SIZE_MIN && parsed <= FONT_SIZE_MAX) {
+      return parsed;
+    }
+  }
+
+  return window.innerWidth <= 768 ? 12 : 14;
+}
 
 function getTerminalWsUrl() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -60,8 +113,123 @@ export function ChatPanel() {
   const intentionalCloseRef = useRef(false);
   const sessionIdRef = useRef<string | null>(readSessionId());
   const compositionRef = useRef(false);
+  const hasSavedFontSizeRef = useRef(
+    typeof window !== "undefined" ? window.localStorage.getItem(FONT_SIZE_STORAGE_KEY) !== null : false,
+  );
   const [resetCounter, setResetCounter] = useState(0);
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const [imeValue, setImeValue] = useState("");
+  const [shiftActive, setShiftActive] = useState(false);
+  const [ctrlActive, setCtrlActive] = useState(false);
+  const [fontSize, setFontSize] = useState(getDefaultFontSize);
+
+  const applyShiftModifier = useCallback((data: string) => {
+    if (!shiftActive) {
+      return data;
+    }
+
+    switch (data) {
+      case "\x1b[A":
+        return "\x1b[1;2A";
+      case "\x1b[B":
+        return "\x1b[1;2B";
+      case "\x1b[C":
+        return "\x1b[1;2C";
+      case "\x1b[D":
+        return "\x1b[1;2D";
+      default:
+        return /^[ -~]$/.test(data) ? data.toUpperCase() : data;
+    }
+  }, [shiftActive]);
+
+  const toCtrlCharacter = useCallback((data: string) => String.fromCharCode(data.toUpperCase().charCodeAt(0) - 64), []);
+
+  const applyCtrlModifier = useCallback((data: string) => {
+    if (!ctrlActive) {
+      return data;
+    }
+
+    switch (data) {
+      case "\x1b[A":
+        return "\x1b[1;5A";
+      case "\x1b[B":
+        return "\x1b[1;5B";
+      case "\x1b[C":
+        return "\x1b[1;5C";
+      case "\x1b[D":
+        return "\x1b[1;5D";
+      default:
+        return /^[A-Za-z]$/.test(data) ? toCtrlCharacter(data) : data;
+    }
+  }, [ctrlActive, toCtrlCharacter]);
+
+  const sendSocketData = useCallback((data: string) => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    socket.send(data);
+    return true;
+  }, []);
+
+  const sendControlKey = useCallback((key: string) => {
+    if (key === "pgup") {
+      terminalRef.current?.scrollPages(-1);
+      terminalRef.current?.focus();
+      return;
+    }
+
+    if (key === "pgdn") {
+      terminalRef.current?.scrollPages(1);
+      terminalRef.current?.focus();
+      return;
+    }
+
+    const data = MOBILE_CONTROL_KEY_MAP[key];
+    if (!data) {
+      return;
+    }
+
+    sendSocketData(applyCtrlModifier(applyShiftModifier(data)));
+    terminalRef.current?.focus();
+  }, [applyCtrlModifier, applyShiftModifier, sendSocketData]);
+
+  const sendImeInput = useCallback(() => {
+    const text = imeValue;
+    if (!text) {
+      return;
+    }
+
+    let output = shiftActive ? text.toUpperCase() : text;
+    if (ctrlActive) {
+      output = output
+        .split("")
+        .map((char) => (/^[A-Za-z]$/.test(char) ? toCtrlCharacter(char) : char))
+        .join("");
+    }
+
+    const terminal = terminalRef.current;
+    if (terminal) {
+      terminal.paste(`${output}\n`);
+    } else if (!sendSocketData(`${output}\n`)) {
+      return;
+    }
+
+    terminalRef.current?.focus();
+    setImeValue("");
+  }, [ctrlActive, imeValue, sendSocketData, shiftActive, toCtrlCharacter]);
+
+  const changeFontSize = useCallback((delta: number) => {
+    setFontSize((current) => {
+      const next = Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, current + delta));
+      if (next === current) {
+        return current;
+      }
+      hasSavedFontSizeRef.current = true;
+      window.localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(next));
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -74,7 +242,7 @@ export function ChatPanel() {
       convertEol: true,
       cursorBlink: true,
       fontFamily: '"JetBrains Mono", "Noto Sans Mono CJK JP", monospace',
-      fontSize: 14,
+      fontSize,
       lineHeight: 1.35,
       theme: TERMINAL_THEME,
     });
@@ -248,7 +416,12 @@ export function ChatPanel() {
     });
     resizeObserverRef.current.observe(container);
 
-    const handleWindowResize = () => fitTerminal();
+    const handleWindowResize = () => {
+      fitTerminal();
+      if (!hasSavedFontSizeRef.current) {
+        setFontSize(window.innerWidth <= 768 ? 12 : 14);
+      }
+    };
     window.addEventListener("resize", handleWindowResize);
 
     const openTerminal = () => {
@@ -319,6 +492,28 @@ export function ChatPanel() {
     };
   }, [resetCounter]);
 
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+
+    if (terminal.options.fontSize !== fontSize) {
+      terminal.options.fontSize = fontSize;
+      fitAddonRef.current?.fit();
+      const socket = socketRef.current;
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(
+          JSON.stringify({
+            type: "resize",
+            cols: terminal.cols,
+            rows: terminal.rows,
+          }),
+        );
+      }
+    }
+  }, [fontSize]);
+
   return (
     <aside className="flex h-[24rem] w-full min-w-0 flex-col rounded-xl border border-gray-800 bg-[#141625] lg:h-full lg:w-80">
       <div className="border-b border-gray-800 px-4 py-3">
@@ -329,25 +524,118 @@ export function ChatPanel() {
               {status === "connected" ? "Connected" : status === "connecting" ? "Connecting..." : "Disconnected"}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              intentionalCloseRef.current = true;
-              sessionIdRef.current = null;
-              writeSessionId(null);
-              setResetCounter((value) => value + 1);
-            }}
-            className="rounded-md border border-gray-700 px-2.5 py-1 text-xs font-medium text-gray-300 transition hover:border-gray-500 hover:text-white"
-          >
-            New Chat
-          </button>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 rounded-md border border-gray-800 bg-[#141625] p-1">
+              <button
+                type="button"
+                onClick={() => changeFontSize(-1)}
+                className="flex min-h-[32px] w-8 items-center justify-center rounded border border-gray-700 text-sm text-gray-300 transition hover:border-gray-500 hover:text-white"
+                aria-label="Decrease terminal font size"
+              >
+                -
+              </button>
+              <span className="min-w-8 text-center text-xs text-gray-400">{fontSize}</span>
+              <button
+                type="button"
+                onClick={() => changeFontSize(1)}
+                className="flex min-h-[32px] w-8 items-center justify-center rounded border border-gray-700 text-sm text-gray-300 transition hover:border-gray-500 hover:text-white"
+                aria-label="Increase terminal font size"
+              >
+                +
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                intentionalCloseRef.current = true;
+                sessionIdRef.current = null;
+                writeSessionId(null);
+                setResetCounter((value) => value + 1);
+              }}
+              className="rounded-md border border-gray-700 px-2.5 py-1 text-xs font-medium text-gray-300 transition hover:border-gray-500 hover:text-white"
+            >
+              New Chat
+            </button>
+          </div>
         </div>
       </div>
-      <div className="min-h-0 flex-1 p-2">
+      <div className="min-h-0 flex-1 p-2 pb-[calc(env(safe-area-inset-bottom,0px)+10rem)] lg:pb-2">
         <div
           ref={containerRef}
           className="h-full w-full overflow-hidden rounded-lg border border-gray-900/80 bg-[#141625] p-2"
         />
+        <div className="mt-2 flex items-center gap-2 rounded-lg border border-gray-800 bg-[#141625] p-2">
+          <input
+            type="text"
+            value={imeValue}
+            onChange={(event) => setImeValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.nativeEvent.isComposing) {
+                return;
+              }
+              event.preventDefault();
+              sendImeInput();
+            }}
+            placeholder="IME入力 / Type here..."
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            className="min-h-[44px] flex-1 rounded-md border border-gray-800 bg-[#1a1d31] px-3 text-sm text-gray-200 outline-none transition focus:border-[#7dd3fc]/50 focus:ring-2 focus:ring-[#7dd3fc]/15"
+          />
+          <button
+            type="button"
+            onClick={sendImeInput}
+            className="min-h-[44px] rounded-md bg-[#7dd3fc] px-4 text-sm font-medium text-[#08111d] transition hover:brightness-105 active:translate-y-px"
+          >
+            Send
+          </button>
+        </div>
+      </div>
+      <div className="fixed inset-x-0 bottom-0 z-10 grid grid-rows-2 gap-2 border-t border-gray-800 bg-[#141625]/90 p-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] backdrop-blur md:hidden">
+        {MOBILE_CONTROL_KEYS.map((row, rowIndex) => (
+          <div
+            key={rowIndex}
+            className={rowIndex === 0 ? "grid grid-cols-6 gap-2" : "grid grid-cols-8 gap-2"}
+          >
+            {row.map((button) => {
+              const isShift = button.id === "shift";
+              const isCtrl = button.id === "ctrl";
+              const isActive = (isShift && shiftActive) || (isCtrl && ctrlActive);
+
+              return (
+                <button
+                  key={button.id}
+                  type="button"
+                  onClick={() => {
+                    if (isShift) {
+                      setShiftActive((value) => !value);
+                      return;
+                    }
+                    if (isCtrl) {
+                      setCtrlActive((value) => !value);
+                      return;
+                    }
+                    sendControlKey(button.id);
+                  }}
+                  className={[
+                    "min-h-[44px] rounded-xl border border-gray-800 bg-white/5 text-sm text-gray-300 transition active:bg-white/10",
+                    "touch-manipulation",
+                    isShift && isActive
+                      ? "border-[rgba(125,211,252,0.5)] bg-[rgba(125,211,252,0.25)] text-[#7dd3fc]"
+                      : "",
+                    isCtrl && isActive
+                      ? "border-[rgba(126,231,135,0.5)] bg-[rgba(126,231,135,0.25)] text-[#7ee787]"
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                >
+                  {button.label}
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </div>
     </aside>
   );
