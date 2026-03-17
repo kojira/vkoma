@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSceneStore } from "../stores/sceneStore";
+import { useTimelineStore } from "../stores/timelineStore";
 
 export function Header() {
   const [exporting, setExporting] = useState(false);
@@ -9,6 +10,7 @@ export function Header() {
   const projectName = useSceneStore((state) => state.projectName);
   const saveProject = useSceneStore((state) => state.saveProject);
   const setProjectName = useSceneStore((state) => state.setProjectName);
+  const saveStatus = useTimelineStore((state) => state.saveStatus);
 
   useEffect(() => {
     if (exportSuccess) {
@@ -105,6 +107,16 @@ export function Header() {
     setProjectName(nextName.trim());
   };
 
+  const saveStatusTone =
+    saveStatus === "saved"
+      ? "bg-emerald-400"
+      : saveStatus === "saving"
+        ? "bg-amber-400"
+        : "bg-red-400";
+
+  const saveStatusLabel =
+    saveStatus === "saved" ? "Saved" : saveStatus === "saving" ? "Saving..." : "Error";
+
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 bg-gray-950 px-4 py-3 sm:px-6 sm:py-4">
       <div className="flex items-center gap-3">
@@ -116,6 +128,10 @@ export function Header() {
         </button>
       </div>
       <div className="flex items-center gap-3">
+        <div className="inline-flex items-center gap-2 rounded-full border border-gray-800 bg-gray-900/80 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-gray-400">
+          <span className={`h-2 w-2 rounded-full ${saveStatusTone}`} />
+          {saveStatusLabel}
+        </div>
         {exportError && (
           <span className="rounded-md bg-red-500/20 px-3 py-1.5 text-xs font-medium text-red-400 animate-pulse">
             ❌ {exportError}

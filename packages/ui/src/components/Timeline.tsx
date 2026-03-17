@@ -124,13 +124,29 @@ function TrackHeader({
 
 function TrackItemBlock({ item, trackType }: { item: TrackItem; trackType: TrackType }) {
   const styles = getTrackStyles(trackType);
+  const selectedItemId = useTimelineStore((state) => state.selectedItemId);
+  const isSelected = selectedItemId === item.id;
 
   return (
     <div
-      className={`absolute top-2 bottom-2 overflow-hidden rounded-lg border px-2 py-1 shadow-sm ${styles.block}`}
+      className={`absolute top-2 bottom-2 overflow-hidden rounded-lg border px-2 py-1 shadow-sm transition ${styles.block} ${
+        isSelected
+          ? "ring-2 ring-offset-1 ring-offset-gray-900 ring-white/80"
+          : "hover:ring-1 hover:ring-white/20"
+      }`}
       style={{
         left: `${item.startTime * PIXELS_PER_SECOND}px`,
         width: `${Math.max(item.duration * PIXELS_PER_SECOND, 8)}px`,
+      }}
+      onMouseDown={(event) => {
+        event.stopPropagation();
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        useTimelineStore.setState({
+          selectedItemId: item.id,
+          selectedTrackId: item.trackId,
+        });
       }}
       title={`${getItemLabel(item)} • ${item.startTime.toFixed(2)}s - ${(item.startTime + item.duration).toFixed(2)}s`}
     >

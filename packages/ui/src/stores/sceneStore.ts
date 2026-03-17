@@ -81,6 +81,16 @@ function createInitialScenes(): SceneItem[] {
   return allScenePresets.map((preset, index) => createSceneFromPreset(preset, index));
 }
 
+interface SavedSceneLike {
+  id?: string;
+  name?: string;
+  duration?: number;
+  params?: Record<string, unknown>;
+  sceneConfigId?: string;
+  renderCode?: string;
+  sceneConfig?: { id?: string };
+}
+
 function serializeScenes(scenes: SceneItem[]): SavedSceneItem[] {
   return scenes.map((scene) => {
     const base = {
@@ -99,6 +109,56 @@ function serializeScenes(scenes: SceneItem[]): SavedSceneItem[] {
   });
 }
 
+export function resolveSceneConfig(
+  savedScene: SavedSceneLike,
+  fallbackName = "Dynamic Scene",
+): SceneConfig | null {
+  const sceneConfigId = savedScene.sceneConfigId ?? savedScene.sceneConfig?.id;
+  let preset = allScenePresets.find((entry) => entry.id === sceneConfigId);
+
+  if (!preset && savedScene.renderCode && typeof savedScene.renderCode === "string") {
+    try {
+      const drawFn = new Function(
+        "ctx",
+        "params",
+        "time",
+        savedScene.renderCode,
+      ) as (
+        ctx: CanvasRenderingContext2D,
+        params: Record<string, unknown>,
+        time: number,
+      ) => void;
+
+      const paramEntries =
+        savedScene.params && typeof savedScene.params === "object"
+          ? Object.entries(savedScene.params)
+          : [];
+      const defaultParams: Record<string, SceneParam> = {};
+      for (const [key, value] of paramEntries) {
+        if (typeof value === "number") {
+          defaultParams[key] = sceneParams.number(key, value);
+        } else if (typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)) {
+          defaultParams[key] = sceneParams.color(key, value);
+        } else if (typeof value === "string") {
+          defaultParams[key] = sceneParams.string(key, value);
+        }
+      }
+
+      preset = defineScene({
+        id: sceneConfigId || `dynamic-${Date.now()}`,
+        name: typeof savedScene.name === "string" ? savedScene.name : fallbackName,
+        duration: typeof savedScene.duration === "number" ? savedScene.duration : 3,
+        defaultParams,
+        draw: drawFn,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  return preset ?? null;
+}
+
 function deserializeScenes(rawScenes: unknown): SceneItem[] {
   if (!Array.isArray(rawScenes)) {
     return createInitialScenes();
@@ -113,47 +173,7 @@ function deserializeScenes(rawScenes: unknown): SceneItem[] {
       const savedScene = scene as Partial<SavedSceneItem> & {
         sceneConfig?: { id?: string };
       };
-      const sceneConfigId = savedScene.sceneConfigId ?? savedScene.sceneConfig?.id;
-      let preset = allScenePresets.find((entry) => entry.id === sceneConfigId);
-
-      if (!preset && savedScene.renderCode && typeof savedScene.renderCode === "string") {
-        try {
-          const drawFn = new Function(
-            "ctx",
-            "params",
-            "time",
-            savedScene.renderCode,
-          ) as (
-            ctx: CanvasRenderingContext2D,
-            params: Record<string, unknown>,
-            time: number,
-          ) => void;
-
-          const paramEntries = savedScene.params && typeof savedScene.params === "object"
-            ? Object.entries(savedScene.params)
-            : [];
-          const defaultParams: Record<string, SceneParam> = {};
-          for (const [key, value] of paramEntries) {
-            if (typeof value === "number") {
-              defaultParams[key] = sceneParams.number(key, value);
-            } else if (typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)) {
-              defaultParams[key] = sceneParams.color(key, value);
-            } else if (typeof value === "string") {
-              defaultParams[key] = sceneParams.string(key, value);
-            }
-          }
-
-          preset = defineScene({
-            id: sceneConfigId || `dynamic-${Date.now()}-${index}`,
-            name: typeof savedScene.name === "string" ? savedScene.name : "Dynamic Scene",
-            duration: typeof savedScene.duration === "number" ? savedScene.duration : 3,
-            defaultParams,
-            draw: drawFn,
-          });
-        } catch {
-          return null;
-        }
-      }
+      const preset = resolveSceneConfig(savedScene, "Dynamic Scene");
 
       if (!preset) {
         return null;
