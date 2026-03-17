@@ -18,7 +18,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [bottomSheetContent, setBottomSheetContent] = useState<"timeline" | "assets" | "params" | null>(null);
   const [previewExpanded, setPreviewExpanded] = useState(false);
-  const [mobileNewChatNonce, setMobileNewChatNonce] = useState(0);
+  const [mobileToolbarVisible, setMobileToolbarVisible] = useState(false);
 
   useEffect(() => {
     if (autoLoadAttempted.current) return;
@@ -41,6 +41,12 @@ export default function App() {
       clearProject();
     });
   }, [clearProject, loadProject]);
+
+  useEffect(() => {
+    if (bottomSheetContent) {
+      setMobileToolbarVisible(false);
+    }
+  }, [bottomSheetContent]);
 
   if (currentProjectId === null) {
     return <ProjectSelector />;
@@ -106,53 +112,58 @@ export default function App() {
           </button>
         )}
         <div className="min-h-0 flex-1">
-          <ChatPanel newChatNonce={mobileNewChatNonce} showNewChatButton={false} />
+          <ChatPanel showNewChatButton={true} />
         </div>
-        <div
-          className="mt-3 grid grid-cols-4 gap-2 border-t border-gray-800 bg-gray-950/90 px-1 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur"
-          style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.75rem)" }}
+        {mobileToolbarVisible && (
+          <div
+            className="mt-3 grid grid-cols-3 gap-2 border-t border-gray-800 bg-gray-950/90 px-1 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur"
+            style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.75rem)" }}
+          >
+            <button
+              type="button"
+              onClick={() => toggleBottomSheet("timeline")}
+              className={`min-h-[44px] rounded-xl border px-2 text-xs font-medium transition ${
+                bottomSheetContent === "timeline"
+                  ? "border-blue-400/50 bg-blue-500/20 text-blue-200"
+                  : "border-gray-800 bg-gray-900 text-gray-200"
+              }`}
+            >
+              🎬 Timeline
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleBottomSheet("assets")}
+              className={`min-h-[44px] rounded-xl border px-2 text-xs font-medium transition ${
+                bottomSheetContent === "assets"
+                  ? "border-blue-400/50 bg-blue-500/20 text-blue-200"
+                  : "border-gray-800 bg-gray-900 text-gray-200"
+              }`}
+            >
+              🎵 Assets
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleBottomSheet("params")}
+              className={`min-h-[44px] rounded-xl border px-2 text-xs font-medium transition ${
+                bottomSheetContent === "params"
+                  ? "border-blue-400/50 bg-blue-500/20 text-blue-200"
+                  : "border-gray-800 bg-gray-900 text-gray-200"
+              }`}
+            >
+              ⚙ Params
+            </button>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setMobileToolbarVisible((value) => !value)}
+          className="fixed right-3 z-30 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-gray-700 bg-gray-900/95 px-3 text-lg text-gray-200 shadow-lg backdrop-blur transition hover:border-gray-600 hover:text-white"
+          style={{ bottom: "calc(env(safe-area-inset-bottom) + 0.75rem)" }}
+          aria-label={mobileToolbarVisible ? "Hide mobile toolbar" : "Show mobile toolbar"}
+          aria-expanded={mobileToolbarVisible}
         >
-          <button
-            type="button"
-            onClick={() => toggleBottomSheet("timeline")}
-            className={`min-h-[44px] rounded-xl border px-2 text-xs font-medium transition ${
-              bottomSheetContent === "timeline"
-                ? "border-blue-400/50 bg-blue-500/20 text-blue-200"
-                : "border-gray-800 bg-gray-900 text-gray-200"
-            }`}
-          >
-            🎬 Timeline
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleBottomSheet("assets")}
-            className={`min-h-[44px] rounded-xl border px-2 text-xs font-medium transition ${
-              bottomSheetContent === "assets"
-                ? "border-blue-400/50 bg-blue-500/20 text-blue-200"
-                : "border-gray-800 bg-gray-900 text-gray-200"
-            }`}
-          >
-            🎵 Assets
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleBottomSheet("params")}
-            className={`min-h-[44px] rounded-xl border px-2 text-xs font-medium transition ${
-              bottomSheetContent === "params"
-                ? "border-blue-400/50 bg-blue-500/20 text-blue-200"
-                : "border-gray-800 bg-gray-900 text-gray-200"
-            }`}
-          >
-            ⚙ Params
-          </button>
-          <button
-            type="button"
-            onClick={() => setMobileNewChatNonce((value) => value + 1)}
-            className="min-h-[44px] rounded-xl border border-gray-800 bg-gray-900 px-2 text-xs font-medium text-gray-200 transition hover:border-gray-700 hover:text-white"
-          >
-            + New Chat
-          </button>
-        </div>
+          {mobileToolbarVisible ? "✕" : "☰"}
+        </button>
       </main>
       {previewExpanded && (
         <div className="fixed inset-0 z-50 bg-black md:hidden">

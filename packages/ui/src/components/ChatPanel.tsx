@@ -539,10 +539,12 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
 
   return (
     <aside className="flex h-full w-full min-w-0 flex-col rounded-xl border border-gray-800 bg-[#141625] lg:h-full lg:w-80">
-      <div className="border-b border-gray-800 px-3 py-2 lg:px-4 lg:py-3">
+      <div className="border-b border-gray-800 px-2 py-1.5 lg:px-4 lg:py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-300 lg:text-sm">AI Terminal</h2>
+            <h2 className="truncate text-sm font-semibold text-gray-200 lg:text-sm lg:uppercase lg:tracking-[0.2em] lg:text-gray-300">
+              AI Terminal
+            </h2>
             <p className="mt-1 hidden text-xs text-gray-500 lg:block">
               {status === "connected" ? "Connected" : status === "connecting" ? "Connecting..." : "Disconnected"}
             </p>
@@ -571,7 +573,7 @@ export function ChatPanel({ newChatNonce = 0, showNewChatButton = true }: ChatPa
               <button
                 type="button"
                 onClick={handleNewChat}
-                className="rounded-md border border-gray-700 px-2 py-0.5 text-[10px] font-medium text-gray-300 transition hover:border-gray-500 hover:text-white lg:px-2.5 lg:py-1 lg:text-xs"
+                className="min-h-[32px] rounded-xl border border-gray-700 px-2 py-0.5 text-[10px] font-medium text-gray-300 transition hover:border-gray-500 hover:text-white lg:min-h-0 lg:rounded-md lg:px-2.5 lg:py-1 lg:text-xs"
               >
                 New Chat
               </button>
