@@ -1406,7 +1406,7 @@ app.get("/api/projects/:id/assets/:assetId/file", async (c) => {
     return new Response(new Uint8Array(data), {
       headers: {
         "Content-Type": asset.mimeType,
-        "Content-Disposition": `inline; filename="${asset.filename}"`,
+        "Content-Disposition": `inline; filename="${encodeURIComponent(asset.filename)}"; filename*=UTF-8''${encodeURIComponent(asset.filename)}`,
         "Content-Length": String(asset.size),
       },
     });

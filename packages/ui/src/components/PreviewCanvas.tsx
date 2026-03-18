@@ -81,7 +81,7 @@ function PreviewCanvasInner() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const liveFFTRef = useRef<number[]>([]);
+  const liveFFTRef = useRef<{ freq: number; energy: number }[]>([]);
   const timelineAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
   const renderFunctionCacheRef = useRef<
     Map<
@@ -118,7 +118,22 @@ function PreviewCanvasInner() {
     if (analyser && isPlaying) {
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
       analyser.getByteFrequencyData(dataArray);
-      liveFFTRef.current = Array.from(dataArray, (value) => value / 255);
+      // Convert raw FFT bins into 8 bands with {freq, energy} format
+      const binCount = dataArray.length;
+      const bandCount = 8;
+      const freqLabels = [60, 150, 400, 1000, 2500, 6000, 10000, 16000];
+      const bands: { freq: number; energy: number }[] = [];
+      const binsPerBand = Math.floor(binCount / bandCount);
+      for (let i = 0; i < bandCount; i++) {
+        let sum = 0;
+        const start = i * binsPerBand;
+        const end = i === bandCount - 1 ? binCount : start + binsPerBand;
+        for (let j = start; j < end; j++) {
+          sum += dataArray[j] / 255;
+        }
+        bands.push({ freq: freqLabels[i], energy: sum / (end - start) });
+      }
+      liveFFTRef.current = bands;
     } else if (!isPlaying) {
       liveFFTRef.current = [];
     }
@@ -327,6 +342,7 @@ function PreviewCanvasInner() {
 
         if (!currentAudios.has(item.id)) {
           const audio = new Audio(`/api/projects/${projectId}/assets/${item.assetId}/file`);
+          audio.crossOrigin = "anonymous";
           audio.preload = "auto";
           const volume = typeof item.params?.volume === "number" ? item.params.volume : 1.0;
           audio.volume = Math.max(0, Math.min(1, volume));
@@ -345,7 +361,7 @@ function PreviewCanvasInner() {
     }
   }, [projectId, tracks]);
 
-  // Sync timeline audio playback with play state
+  // Sync timeline audio playback with play state and connect to AnalyserNode for FFT
   useEffect(() => {
     const audioTracks = tracks.filter((t) => t.type === "audio" && !t.muted);
     const currentAudios = timelineAudioRefs.current;
@@ -366,6 +382,27 @@ function PreviewCanvasInner() {
             audio.currentTime = Math.max(0, localTime);
           }
           if (isPlaying) {
+            // Initialize AudioContext and connect timeline audio for FFT analysis
+            if (!audioContextRef.current) {
+              const ctx = new AudioContext();
+              audioContextRef.current = ctx;
+              const analyser = ctx.createAnalyser();
+              analyser.fftSize = 128;
+              analyserRef.current = analyser;
+              analyser.connect(ctx.destination);
+            }
+            if (!sourceRef.current) {
+              try {
+                const source = audioContextRef.current.createMediaElementSource(audio);
+                source.connect(analyserRef.current!);
+                sourceRef.current = source;
+              } catch {
+                // Already connected — ignore
+              }
+            }
+            if (audioContextRef.current.state === "suspended") {
+              void audioContextRef.current.resume();
+            }
             void audio.play().catch(() => {});
           } else {
             audio.pause();

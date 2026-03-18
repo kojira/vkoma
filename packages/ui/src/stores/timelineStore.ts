@@ -83,6 +83,10 @@ function defaultTrackName(type: TrackType, count: number): string {
 }
 
 function isProjectV1(project: ProjectV1 | ProjectV2Response): project is ProjectV1 {
+  // V2 (timeline付き) の場合はV1と判定しない
+  if ("timeline" in project && typeof (project as ProjectV2Response).timeline === "object" && (project as ProjectV2Response).timeline !== null) {
+    return false;
+  }
   return Array.isArray((project as ProjectV1).scenes);
 }
 
