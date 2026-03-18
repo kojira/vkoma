@@ -40,6 +40,17 @@ export default function App() {
     });
   }, [clearProject, loadProject]);
 
+  useEffect(() => {
+    if (!currentProjectId) return;
+
+    const interval = setInterval(() => {
+      void useTimelineStore.getState().loadProject(currentProjectId);
+      void loadProject(currentProjectId);
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [currentProjectId, loadProject]);
+
   if (currentProjectId === null) {
     return <ProjectSelector />;
   }
@@ -60,6 +71,13 @@ export default function App() {
         next.delete(section);
       } else {
         next.add(section);
+        if (section === "preview" || section === "timeline") {
+          const projectId = useSceneStore.getState().currentProjectId;
+          if (projectId) {
+            void loadProject(projectId);
+            void useTimelineStore.getState().loadProject(projectId);
+          }
+        }
       }
       return next;
     });

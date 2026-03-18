@@ -240,14 +240,19 @@ export const useSceneStore = create<SceneStore>()((set, get) => ({
         }
 
         const scenes = deserializeScenes(project.scenes);
-        set(() => ({
-          currentProjectId: project.id ?? null,
-          projectName: typeof project.name === "string" ? project.name : "",
-          scenes,
-          currentSceneIndex: 0,
-          currentFrame: 0,
-          isPlaying: false,
-        }));
+        const currentState = get();
+        const scenesChanged = JSON.stringify(serializeScenes(currentState.scenes)) !== JSON.stringify(serializeScenes(scenes));
+
+        if (scenesChanged || currentState.currentProjectId !== (project.id ?? null)) {
+          set(() => ({
+            currentProjectId: project.id ?? null,
+            projectName: typeof project.name === "string" ? project.name : "",
+            scenes,
+            currentSceneIndex: 0,
+            currentFrame: 0,
+            isPlaying: false,
+          }));
+        }
         try {
           const bgmResponse = await fetch(`/api/projects/${id}/bgm`);
           if (bgmResponse.ok) {

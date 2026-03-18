@@ -373,22 +373,32 @@ export const useTimelineStore = create<TimelineStore>()((set, get) => ({
         }
         const assetsData = (await assetsResponse.json()) as AssetsResponse;
 
-        set(() => ({
-          projectId: v2Project.id ?? id,
-          projectName: typeof v2Project.name === "string" ? v2Project.name : "",
-          fps: typeof v2Project.fps === "number" ? v2Project.fps : 30,
-          width: typeof v2Project.width === "number" ? v2Project.width : 1920,
-          height: typeof v2Project.height === "number" ? v2Project.height : 1080,
-          tracks: Array.isArray(v2Project.timeline?.tracks) ? v2Project.timeline.tracks : [],
-          assets: Array.isArray(assetsData.assets) ? assetsData.assets : [],
-          bgmFile: null,
-          fftCache: null,
-          saveStatus: "saved",
-          isPlaying: false,
-          currentTime: 0,
-          selectedTrackId: null,
-          selectedItemId: null,
-        }));
+        const incomingTracks = Array.isArray(v2Project.timeline?.tracks) ? v2Project.timeline.tracks : [];
+        const incomingAssets = Array.isArray(assetsData.assets) ? assetsData.assets : [];
+        const currentState = get();
+        const tracksChanged = JSON.stringify(currentState.tracks) !== JSON.stringify(incomingTracks);
+        const assetsChanged = JSON.stringify(currentState.assets) !== JSON.stringify(incomingAssets);
+
+        if (tracksChanged || assetsChanged || currentState.projectId !== (v2Project.id ?? id)) {
+          _isLoadingFromServer = true;
+          set(() => ({
+            projectId: v2Project.id ?? id,
+            projectName: typeof v2Project.name === "string" ? v2Project.name : "",
+            fps: typeof v2Project.fps === "number" ? v2Project.fps : 30,
+            width: typeof v2Project.width === "number" ? v2Project.width : 1920,
+            height: typeof v2Project.height === "number" ? v2Project.height : 1080,
+            tracks: incomingTracks,
+            assets: incomingAssets,
+            bgmFile: null,
+            fftCache: null,
+            saveStatus: "saved",
+            isPlaying: false,
+            currentTime: 0,
+            selectedTrackId: null,
+            selectedItemId: null,
+          }));
+          _isLoadingFromServer = false;
+        }
 
         try {
           const bgmResponse = await fetch(`/api/projects/${id}/bgm`);
@@ -435,6 +445,8 @@ export const useTimelineStore = create<TimelineStore>()((set, get) => ({
         }
       },
 }));
+
+let _isLoadingFromServer = false;
 
 let lastSavedProjectId: string | null = null;
 let lastSavedTracksSnapshot = JSON.stringify(useTimelineStore.getState().tracks);
@@ -525,7 +537,7 @@ useTimelineStore.subscribe((state, prevState) => {
     syncAutoSaveBaseline(state.projectId, state.tracks);
   }
 
-  if (state.tracks !== prevState.tracks) {
+  if (state.tracks !== prevState.tracks && !_isLoadingFromServer) {
     scheduleTimelineSave();
   }
 });
