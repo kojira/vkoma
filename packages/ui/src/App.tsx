@@ -44,6 +44,8 @@ export default function App() {
     if (!currentProjectId) return;
 
     const interval = setInterval(() => {
+      // Skip polling while playing to avoid interrupting playback
+      if (useTimelineStore.getState().isPlaying) return;
       void useTimelineStore.getState().loadProject(currentProjectId);
       void loadProject(currentProjectId);
     }, 3000);

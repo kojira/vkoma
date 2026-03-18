@@ -76,13 +76,11 @@ const toImageUrl = (path: string): string => {
 function PreviewCanvasInner() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [, setImageVersion] = useState(0);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioUrlRef = useRef<string | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const liveFFTRef = useRef<{ freq: number; energy: number }[]>([]);
   const timelineAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
+  // Per-track AnalyserNode map: trackId → { analyser, source }
+  const trackAnalysersRef = useRef<Map<string, { analyser: AnalyserNode; source: MediaElementAudioSourceNode }>>(new Map());
+  const trackFFTRef = useRef<Map<string, { freq: number; energy: number }[]>>(new Map());
   const renderFunctionCacheRef = useRef<
     Map<
       string,
@@ -95,7 +93,6 @@ function PreviewCanvasInner() {
   const fps = useTimelineStore((state) => state.fps);
   const tracks = useTimelineStore((state) => state.tracks);
   const projectId = useTimelineStore((state) => state.projectId);
-  const bgmFile = useTimelineStore((state) => state.bgmFile);
   const fftCache = useTimelineStore((state) => state.fftCache);
   const setPlaying = useTimelineStore((state) => state.setPlaying);
   const setCurrentTime = useTimelineStore((state) => state.setCurrentTime);
@@ -114,34 +111,34 @@ function PreviewCanvasInner() {
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     const frameIndex = Math.max(0, Math.floor(currentTime * fps));
     const fftFrame = fftCache?.frames[frameIndex];
-    const analyser = analyserRef.current;
-    if (analyser && isPlaying) {
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      analyser.getByteFrequencyData(dataArray);
-      // Convert raw FFT bins into 8 bands with {freq, energy} format
-      const binCount = dataArray.length;
-      const bandCount = 8;
-      const freqLabels = [60, 150, 400, 1000, 2500, 6000, 10000, 16000];
-      const bands: { freq: number; energy: number }[] = [];
-      const binsPerBand = Math.floor(binCount / bandCount);
-      for (let i = 0; i < bandCount; i++) {
-        let sum = 0;
-        const start = i * binsPerBand;
-        const end = i === bandCount - 1 ? binCount : start + binsPerBand;
-        for (let j = start; j < end; j++) {
-          sum += dataArray[j] / 255;
+
+    // Compute per-track live FFT from each track's AnalyserNode
+    const freqLabels = [60, 150, 400, 1000, 2500, 6000, 10000, 16000];
+    const bandCount = 8;
+    if (isPlaying) {
+      for (const [trackId, entry] of trackAnalysersRef.current) {
+        const dataArray = new Uint8Array(entry.analyser.frequencyBinCount);
+        entry.analyser.getByteFrequencyData(dataArray);
+        const binCount = dataArray.length;
+        const binsPerBand = Math.floor(binCount / bandCount);
+        const bands: { freq: number; energy: number }[] = [];
+        for (let i = 0; i < bandCount; i++) {
+          let sum = 0;
+          const start = i * binsPerBand;
+          const end = i === bandCount - 1 ? binCount : start + binsPerBand;
+          for (let j = start; j < end; j++) {
+            sum += dataArray[j] / 255;
+          }
+          bands.push({ freq: freqLabels[i], energy: sum / (end - start) });
         }
-        bands.push({ freq: freqLabels[i], energy: sum / (end - start) });
+        trackFFTRef.current.set(trackId, bands);
       }
-      liveFFTRef.current = bands;
-    } else if (!isPlaying) {
-      liveFFTRef.current = [];
+    } else {
+      trackFFTRef.current.clear();
     }
 
-    const liveFFT = liveFFTRef.current;
-    const hasLiveFFT = liveFFT.length > 0 && isPlaying;
-    const fftBands = hasLiveFFT ? liveFFT : (fftFrame?.bands ?? []);
-    const beatIntensity = hasLiveFFT ? 0 : (fftFrame?.beatIntensity ?? 0);
+    // Find first audio track ID for fallback
+    const firstAudioTrackId = tracks.find((t) => t.type === "audio" && !t.muted)?.id ?? null;
 
     const activeVideoItems = tracks
       .filter((track) => track.type === "video" && track.visible && !track.muted)
@@ -163,6 +160,16 @@ function PreviewCanvasInner() {
 
     for (const { item } of activeVideoItems) {
       const localTime = currentTime - item.startTime;
+
+      // Resolve FFT data: prefer per-track live FFT, then cached
+      const fftSourceTrackId = typeof item.params?.fftSourceTrackId === "string"
+        ? item.params.fftSourceTrackId
+        : firstAudioTrackId;
+      const trackLiveFFT = fftSourceTrackId ? trackFFTRef.current.get(fftSourceTrackId) : null;
+      const hasTrackFFT = trackLiveFFT && trackLiveFFT.length > 0 && isPlaying;
+      const fftBands = hasTrackFFT ? trackLiveFFT : (fftFrame?.bands ?? []);
+      const beatIntensity = hasTrackFFT ? 0 : (fftFrame?.beatIntensity ?? 0);
+
       const params: Record<string, unknown> = {
         ...item.params,
         fftBands: JSON.stringify(fftBands),
@@ -276,100 +283,91 @@ function PreviewCanvasInner() {
     }
   }, [currentTime, fftCache, fps, isPlaying, tracks]);
 
-  useEffect(() => {
-    if (!audioRef.current) {
-      audioRef.current = new Audio();
-    }
-
-    const audio = audioRef.current;
-    if (!audio) {
-      return;
-    }
-
-    audio.pause();
-
-    if (audioUrlRef.current) {
-      URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = null;
-    }
-
-    if (!bgmFile) {
-      audio.removeAttribute("src");
-      audio.load();
-      return;
-    }
-
-    const objectUrl = URL.createObjectURL(bgmFile);
-    audioUrlRef.current = objectUrl;
-    audio.src = objectUrl;
-    audio.load();
-  }, [bgmFile]);
-
+  // Cleanup AudioContext and analysers on unmount
   useEffect(() => {
     return () => {
-      const audio = audioRef.current;
-      if (audio) {
-        audio.pause();
-        audio.removeAttribute("src");
-        audio.load();
-      }
-
-      if (audioUrlRef.current) {
-        URL.revokeObjectURL(audioUrlRef.current);
-        audioUrlRef.current = null;
-      }
-
       if (audioContextRef.current) {
         void audioContextRef.current.close();
         audioContextRef.current = null;
-        analyserRef.current = null;
-        sourceRef.current = null;
       }
+      trackAnalysersRef.current.clear();
+      trackFFTRef.current.clear();
     };
   }, []);
 
-  // Timeline audio track playback
+  // Timeline audio: create/remove Audio elements and connect per-track AnalyserNodes.
+  // Audio elements persist across mute/unmute to keep MediaElementSource connections alive.
   useEffect(() => {
     const audioTracks = tracks.filter((track) => track.type === "audio");
     const currentAudios = timelineAudioRefs.current;
     const activeIds = new Set<string>();
 
+    // Initialize shared AudioContext lazily
+    if (!audioContextRef.current && audioTracks.some((t) => t.items.length > 0)) {
+      audioContextRef.current = new AudioContext();
+    }
+
     for (const track of audioTracks) {
-      if (track.muted) continue;
       for (const item of track.items) {
         if (!item.assetId || !projectId) continue;
-        activeIds.add(item.id);
+        const key = `${track.id}::${item.id}`;
+        activeIds.add(key);
 
-        if (!currentAudios.has(item.id)) {
+        if (!currentAudios.has(key)) {
           const audio = new Audio(`/api/projects/${projectId}/assets/${item.assetId}/file`);
           audio.crossOrigin = "anonymous";
           audio.preload = "auto";
-          const volume = typeof item.params?.volume === "number" ? item.params.volume : 1.0;
-          audio.volume = Math.max(0, Math.min(1, volume));
-          currentAudios.set(item.id, audio);
+          currentAudios.set(key, audio);
+
+          // Connect per-track AnalyserNode (one-time, survives mute/unmute)
+          if (audioContextRef.current && !trackAnalysersRef.current.has(track.id)) {
+            try {
+              const analyser = audioContextRef.current.createAnalyser();
+              analyser.fftSize = 128;
+              const source = audioContextRef.current.createMediaElementSource(audio);
+              source.connect(analyser);
+              analyser.connect(audioContextRef.current.destination);
+              trackAnalysersRef.current.set(track.id, { analyser, source });
+            } catch {
+              // Already connected — ignore
+            }
+          }
         }
+
+        // Apply volume: muted → 0, otherwise use item volume
+        const audio = currentAudios.get(key)!;
+        const vol = track.muted ? 0 : (typeof item.params?.volume === "number" ? item.params.volume : 1.0);
+        audio.volume = Math.max(0, Math.min(1, vol));
       }
     }
 
-    for (const [id, audio] of currentAudios) {
-      if (!activeIds.has(id)) {
+    // Remove Audio elements for items that no longer exist
+    for (const [key, audio] of currentAudios) {
+      if (!activeIds.has(key)) {
         audio.pause();
         audio.removeAttribute("src");
         audio.load();
-        currentAudios.delete(id);
+        currentAudios.delete(key);
+        // Clean up analyser for removed tracks
+        const trackId = key.split("::")[0];
+        const stillHasTrack = [...activeIds].some((k) => k.startsWith(trackId + "::"));
+        if (!stillHasTrack) {
+          trackAnalysersRef.current.delete(trackId);
+        }
       }
     }
   }, [projectId, tracks]);
 
-  // Sync timeline audio playback with play state and connect to AnalyserNode for FFT
+  // Sync timeline audio playback with play state
   useEffect(() => {
-    const audioTracks = tracks.filter((t) => t.type === "audio" && !t.muted);
+    const audioTracks = tracks.filter((t) => t.type === "audio");
     const currentAudios = timelineAudioRefs.current;
     const globalTime = currentTime;
 
     for (const track of audioTracks) {
       for (const item of track.items) {
-        const audio = currentAudios.get(item.id);
+        const key = `${track.id}::${item.id}`;
+        const audio = currentAudios.get(key);
         if (!audio) continue;
 
         const itemStart = item.startTime ?? 0;
@@ -382,25 +380,7 @@ function PreviewCanvasInner() {
             audio.currentTime = Math.max(0, localTime);
           }
           if (isPlaying) {
-            // Initialize AudioContext and connect timeline audio for FFT analysis
-            if (!audioContextRef.current) {
-              const ctx = new AudioContext();
-              audioContextRef.current = ctx;
-              const analyser = ctx.createAnalyser();
-              analyser.fftSize = 128;
-              analyserRef.current = analyser;
-              analyser.connect(ctx.destination);
-            }
-            if (!sourceRef.current) {
-              try {
-                const source = audioContextRef.current.createMediaElementSource(audio);
-                source.connect(analyserRef.current!);
-                sourceRef.current = source;
-              } catch {
-                // Already connected — ignore
-              }
-            }
-            if (audioContextRef.current.state === "suspended") {
+            if (audioContextRef.current?.state === "suspended") {
               void audioContextRef.current.resume();
             }
             void audio.play().catch(() => {});
@@ -436,39 +416,6 @@ function PreviewCanvasInner() {
     };
   }, [fps, setCurrentTime, setPlaying]);
 
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || !bgmFile) {
-      return;
-    }
-
-    const targetTime = currentTime;
-    if (Math.abs(audio.currentTime - targetTime) >= 0.5) {
-      audio.currentTime = targetTime;
-    }
-
-    if (isPlaying) {
-      // Initialize AudioContext on user-initiated play (autoplay policy)
-      if (!audioContextRef.current) {
-        const ctx = new AudioContext();
-        audioContextRef.current = ctx;
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 128;
-        analyserRef.current = analyser;
-        const source = ctx.createMediaElementSource(audio);
-        source.connect(analyser);
-        analyser.connect(ctx.destination);
-        sourceRef.current = source;
-      }
-      if (audioContextRef.current.state === "suspended") {
-        void audioContextRef.current.resume();
-      }
-      void audio.play().catch(() => {});
-      return;
-    }
-
-    audio.pause();
-  }, [bgmFile, currentTime, isPlaying]);
 
   return (
     <div className="w-full rounded-xl border border-gray-800 bg-gray-950 p-4 shadow-2xl">

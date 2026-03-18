@@ -162,6 +162,7 @@ export function Timeline() {
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number | null>(null);
+  const playTimeRef = useRef<number>(0);
 
   const tracks = useTimelineStore((state) => state.tracks);
   const fps = useTimelineStore((state) => state.fps);
@@ -190,6 +191,8 @@ export function Timeline() {
       return;
     }
 
+    playTimeRef.current = useTimelineStore.getState().currentTime;
+
     const tick = (timestamp: number) => {
       if (totalDuration <= 0) {
         setPlaying(false);
@@ -200,13 +203,14 @@ export function Timeline() {
       const deltaSeconds = (timestamp - previousTimestamp) / 1000;
       lastFrameTimeRef.current = timestamp;
 
-      const nextTime = currentTime + deltaSeconds;
+      const nextTime = playTimeRef.current + deltaSeconds;
       if (nextTime >= totalDuration) {
         setCurrentTime(totalDuration);
         setPlaying(false);
         return;
       }
 
+      playTimeRef.current = nextTime;
       setCurrentTime(nextTime);
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -220,7 +224,7 @@ export function Timeline() {
       }
       lastFrameTimeRef.current = null;
     };
-  }, [currentTime, isPlaying, setCurrentTime, setPlaying, totalDuration]);
+  }, [isPlaying, setCurrentTime, setPlaying, totalDuration]);
 
   const handleSeek = (clientX: number) => {
     const timelineElement = timelineRef.current;

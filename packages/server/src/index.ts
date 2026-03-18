@@ -1264,6 +1264,41 @@ async function saveAssetFile(
   library.assets.push(asset);
   await writeAssetLibrary(projectId, library);
 
+  // For audio assets, also copy as BGM and trigger FFT analysis
+  if (assetType === "audio") {
+    const projectDir = getProjectDir(projectId);
+    const ext = path.extname(safeFilename).toLowerCase() || ".wav";
+    const bgmPath = path.join(projectDir, `bgm${ext}`);
+    try {
+      // Remove any existing BGM files
+      const files = await readdir(projectDir);
+      for (const f of files) {
+        if (/^bgm\.(wav|mp3|ogg|aac|flac|m4a|webm)$/.test(f)) {
+          await rm(path.join(projectDir, f)).catch(() => {});
+        }
+      }
+      await writeFile(bgmPath, fileData);
+      // Generate FFT cache asynchronously
+      (async () => {
+        try {
+          const analyzer = createAudioAnalyzer(bgmPath, { bands: 32, fps: 30 });
+          const frames: Array<{ bands: number[]; beatIntensity: number }> = [];
+          for (let i = 0; i < analyzer.totalFrames; i++) {
+            const fd = analyzer.getFrame(i);
+            frames.push({ bands: fd.bands, beatIntensity: fd.beatIntensity });
+          }
+          const cachePath = path.join(projectDir, "fft-cache.json");
+          await writeFile(cachePath, JSON.stringify({ frames }), "utf8");
+          console.log(`[FFT cache] generated ${frames.length} frames for asset ${safeFilename}`);
+        } catch (e) {
+          console.error("[FFT cache] failed for asset", safeFilename, e);
+        }
+      })();
+    } catch (e) {
+      console.error("[BGM copy] failed for asset", safeFilename, e);
+    }
+  }
+
   return asset;
 }
 
