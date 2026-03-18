@@ -35,7 +35,7 @@ import { renderFrameWithTracks } from "./render-frame.js";
 import { WorkerPool } from "./workerPool.js";
 
 const require = createRequire(import.meta.url);
-const { createChatServer } = require("/Volumes/2TB/openclaw/workspace/projects/cli-chat-poc/src/server.js");
+const { createChatServer } = require("/Volumes/2TB/openclaw/workspace/projects/embed-terminal/src/server.js");
 
 process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EPIPE') {
