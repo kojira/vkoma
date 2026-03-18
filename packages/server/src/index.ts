@@ -10,7 +10,7 @@ import crypto from "node:crypto";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { createCanvas, loadImage, GlobalFonts } from "@napi-rs/canvas";
@@ -36,6 +36,125 @@ import { WorkerPool } from "./workerPool.js";
 
 const require = createRequire(import.meta.url);
 const { createChatServer } = require("/Volumes/2TB/openclaw/workspace/projects/embed-terminal/src/server.js");
+
+const SESSION_STORE_PATH = "/tmp/vkoma-claude-sessions.json";
+
+function loadSessionStore(): Record<string, string> {
+  try {
+    return JSON.parse(readFileSync(SESSION_STORE_PATH, "utf-8")) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+function saveSessionStore(store: Record<string, string>): void {
+  writeFileSync(SESSION_STORE_PATH, JSON.stringify(store, null, 2));
+}
+
+function getClaudeSessionId(projectId: string): string | null {
+  if (!projectId) return null;
+  const store = loadSessionStore();
+  return store[projectId] ?? null;
+}
+
+function setClaudeSessionId(projectId: string, claudeSessionId: string): void {
+  if (!projectId) return;
+  const store = loadSessionStore();
+  store[projectId] = claudeSessionId;
+  saveSessionStore(store);
+}
+
+function removeClaudeSessionId(projectId: string): void {
+  if (!projectId) return;
+  const store = loadSessionStore();
+  delete store[projectId];
+  saveSessionStore(store);
+}
+
+function isClaudeSessionResumable(sessionId: string, cwd: string): boolean {
+  if (!sessionId || !cwd) return false;
+  const projectDir = path.join(os.homedir(), ".claude", "projects", cwd.replace(/\//g, "-"));
+  const sessionFile = path.join(projectDir, `${sessionId}.jsonl`);
+  return existsSync(sessionFile);
+}
+
+function detectClaudeSessionId(
+  pid: number,
+  projectId: string,
+  preExistingFiles: Set<string>,
+  cwd: string,
+): void {
+  if (!pid || !projectId) return;
+  const sessionsDir = path.join(os.homedir(), ".claude", "sessions");
+  const maxAttempts = 20;
+  let attempts = 0;
+
+  console.log(`[detectSession] Start: pid=${pid}, projectId=${projectId}, cwd=${cwd}`);
+
+  const check = () => {
+    attempts++;
+
+    // Fast path: check PID-based file first
+    const sessionFile = path.join(sessionsDir, `${pid}.json`);
+    try {
+      const data = JSON.parse(readFileSync(sessionFile, "utf-8")) as { sessionId?: string };
+      if (data.sessionId) {
+        setClaudeSessionId(projectId, data.sessionId);
+        console.log(`[detectSession] Found via PID file, attempt #${attempts}`);
+        return;
+      }
+    } catch {
+      // PID file not ready yet
+    }
+
+    // Fallback: directory diff approach
+    try {
+      const currentFiles = readdirSync(sessionsDir);
+      const newFiles = currentFiles.filter((f) => !preExistingFiles.has(f) && f.endsWith(".json"));
+
+      let bestMatch: string | null = null;
+      let bestStartedAt: string | null = null;
+
+      for (const file of newFiles) {
+        try {
+          const data = JSON.parse(
+            readFileSync(path.join(sessionsDir, file), "utf-8"),
+          ) as { sessionId?: string; cwd?: string; startedAt?: string };
+          if (!data.sessionId) continue;
+
+          if (cwd && data.cwd === cwd) {
+            setClaudeSessionId(projectId, data.sessionId);
+            console.log(`[detectSession] Found via cwd match in ${file}, attempt #${attempts}`);
+            return;
+          }
+
+          if (data.startedAt && (!bestStartedAt || data.startedAt > bestStartedAt)) {
+            bestStartedAt = data.startedAt;
+            bestMatch = data.sessionId;
+          }
+        } catch {
+          // skip unreadable files
+        }
+      }
+
+      if (bestMatch) {
+        setClaudeSessionId(projectId, bestMatch);
+        console.log(`[detectSession] Best match: ${bestMatch}, attempt #${attempts}`);
+        return;
+      }
+    } catch {
+      // sessionsDir not readable yet
+    }
+
+    if (attempts < maxAttempts) {
+      setTimeout(check, 500);
+    } else {
+      console.log(`[detectSession] Max attempts reached without finding session ID`);
+    }
+  };
+
+  setTimeout(check, 1000);
+}
 
 process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EPIPE') {
@@ -1501,31 +1620,71 @@ const server = serve(
 
 createChatServer(server, {
   path: "/terminal-ws",
-  provider: process.env.AI_PROVIDER || "claude",
   cwd: projectsRoot,
   env: { ...process.env, PATH: process.env.PATH + ":/usr/local/bin:/Users/kojira/.local/bin" },
-  getSystemPrompt: async (searchParams: URLSearchParams) => {
-    const projectId = searchParams.get("projectId");
-    if (!projectId) return undefined;
-    try {
-      const project = await readProject(projectId);
-      const sceneCount = Array.isArray(project.scenes) ? project.scenes.length : 0;
-      const trackCount = project.timeline?.tracks?.length ?? 0;
-      const duration = project.timeline?.duration ?? 0;
-      return [
-        `## 現在のvKomaプロジェクト`,
-        `- プロジェクト名: ${project.name}`,
-        `- プロジェクトID: ${projectId}`,
-        `- シーン数: ${sceneCount}`,
-        `- トラック数: ${trackCount}`,
-        `- 全体の長さ: ${duration}秒`,
-        `- API Base: http://localhost:3001/api/projects/${projectId}`,
-        ``,
-        `プロジェクトの操作にはcurlでAPIを叩いてください。`,
-        `例: curl http://localhost:3001/api/projects/${projectId} | jq`,
-      ].join("\n");
-    } catch {
-      return undefined;
+  getCommandAndArgs: async (searchParams: URLSearchParams) => {
+    const aiProvider = (process.env.AI_PROVIDER || "claude").toLowerCase();
+    const command = aiProvider === "codex" ? "codex" : "claude";
+    const projectId = searchParams.get("projectId") ?? "";
+    const args: string[] = [];
+
+    if (projectId) {
+      // Check for resumable session
+      let claudeSessionId = getClaudeSessionId(projectId);
+      if (claudeSessionId && !isClaudeSessionResumable(claudeSessionId, projectsRoot)) {
+        removeClaudeSessionId(projectId);
+        claudeSessionId = null;
+      }
+
+      if (claudeSessionId && command === "claude") {
+        args.push("--resume", claudeSessionId);
+        console.log(`[terminal] Resuming session: ${claudeSessionId}`);
+      } else {
+        // Build system prompt for new session
+        try {
+          const project = await readProject(projectId);
+          const sceneCount = Array.isArray(project.scenes) ? project.scenes.length : 0;
+          const trackCount = project.timeline?.tracks?.length ?? 0;
+          const duration = project.timeline?.duration ?? 0;
+          const systemPrompt = [
+            `## 現在のvKomaプロジェクト`,
+            `- プロジェクト名: ${project.name}`,
+            `- プロジェクトID: ${projectId}`,
+            `- シーン数: ${sceneCount}`,
+            `- トラック数: ${trackCount}`,
+            `- 全体の長さ: ${duration}秒`,
+            `- API Base: http://localhost:3001/api/projects/${projectId}`,
+            ``,
+            `プロジェクトの操作にはcurlでAPIを叩いてください。`,
+            `例: curl http://localhost:3001/api/projects/${projectId} | jq`,
+          ].join("\n");
+          if (command === "claude") {
+            args.push("--append-system-prompt", systemPrompt);
+          }
+        } catch {
+          // No project found, start without system prompt
+        }
+      }
     }
+
+    return { command, args };
+  },
+  onSessionCreated: ({ pid, searchParams }: { pid: number; searchParams: URLSearchParams }) => {
+    const projectId = searchParams.get("projectId") ?? "";
+    if (!projectId) return;
+    const existingSessionId = getClaudeSessionId(projectId);
+    if (existingSessionId) {
+      console.log(`[detectSession] Skipping detection for resumed session: ${existingSessionId}`);
+      return;
+    }
+    // Snapshot existing session files before detection
+    const sessionsDir = path.join(os.homedir(), ".claude", "sessions");
+    let preExistingFiles: Set<string>;
+    try {
+      preExistingFiles = new Set(readdirSync(sessionsDir));
+    } catch {
+      preExistingFiles = new Set();
+    }
+    detectClaudeSessionId(pid, projectId, preExistingFiles, projectsRoot);
   },
 });
