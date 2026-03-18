@@ -35,7 +35,7 @@ import { renderFrameWithTracks } from "./render-frame.js";
 import { WorkerPool } from "./workerPool.js";
 
 const require = createRequire(import.meta.url);
-const { createChatServer } = require("/Volumes/2TB/openclaw/workspace/projects/embed-terminal/src/server.js");
+const { createChatServer } = require("embed-terminal");
 
 const SESSION_STORE_PATH = "/tmp/vkoma-claude-sessions.json";
 
@@ -276,7 +276,7 @@ function mergeProjectPatch(project: Project, patch: ProjectPatchBody): Project {
     nextProject.timeline = {
       duration: project.timeline?.duration ?? 0,
       tracks: project.timeline?.tracks ?? [],
-      ...patch.timeline,
+      ...(patch.timeline as object),
     };
   }
 
@@ -1621,8 +1621,7 @@ const server = serve(
 createChatServer(server, {
   path: "/terminal-ws",
   cwd: projectsRoot,
-  env: { ...process.env, PATH: process.env.PATH + ":/usr/local/bin:/Users/kojira/.local/bin" },
-  getCommandAndArgs: async (searchParams: URLSearchParams) => {
+  getCommandAndArgs: (async (searchParams: URLSearchParams) => {
     const aiProvider = (process.env.AI_PROVIDER || "claude").toLowerCase();
     const command = aiProvider === "codex" ? "codex" : "claude";
     const projectId = searchParams.get("projectId") ?? "";
@@ -1668,7 +1667,7 @@ createChatServer(server, {
     }
 
     return { command, args };
-  },
+  }) as unknown as (searchParams: URLSearchParams) => { command: string; args?: string[] },
   onSessionCreated: ({ pid, searchParams }: { pid: number; searchParams: URLSearchParams }) => {
     const projectId = searchParams.get("projectId") ?? "";
     if (!projectId) return;
