@@ -1,6 +1,9 @@
 import "dotenv/config";
 import { serve } from "@hono/node-server";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import fs from "node:fs";
 import crypto from "node:crypto";
@@ -1246,6 +1249,24 @@ async function saveAssetFile(
     }
   }
 
+  let duration = 0;
+  if (assetType === "audio" || assetType === "video") {
+    try {
+      const { stdout } = await execFileAsync("ffprobe", [
+        "-v", "quiet",
+        "-show_entries", "format=duration",
+        "-of", "csv=p=0",
+        destPath,
+      ]);
+      const parsed = parseFloat(stdout.trim());
+      if (Number.isFinite(parsed) && parsed > 0) {
+        duration = parsed;
+      }
+    } catch (e) {
+      console.error("[ffprobe] failed to get duration for", safeFilename, e);
+    }
+  }
+
   const asset: Asset = {
     id: crypto.randomUUID(),
     type: assetType,
@@ -1255,7 +1276,7 @@ async function saveAssetFile(
     size: fileStat.size,
     ...(width !== undefined && { width }),
     ...(height !== undefined && { height }),
-    duration: 0,
+    duration,
     projectPath: `assets/${safeFilename}`,
     createdAt: new Date().toISOString(),
   };
