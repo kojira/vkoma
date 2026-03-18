@@ -191,12 +191,17 @@ export function Timeline() {
     }
 
     const tick = (timestamp: number) => {
+      if (totalDuration <= 0) {
+        setPlaying(false);
+        return;
+      }
+
       const previousTimestamp = lastFrameTimeRef.current ?? timestamp;
       const deltaSeconds = (timestamp - previousTimestamp) / 1000;
       lastFrameTimeRef.current = timestamp;
 
       const nextTime = currentTime + deltaSeconds;
-      if (nextTime >= totalDuration && totalDuration > 0) {
+      if (nextTime >= totalDuration) {
         setCurrentTime(totalDuration);
         setPlaying(false);
         return;
@@ -236,8 +241,13 @@ export function Timeline() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setPlaying(!isPlaying)}
-            className="rounded-md bg-blue-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-400"
+            onClick={() => {
+              if (!isPlaying && totalDuration <= 0) return;
+              setPlaying(!isPlaying);
+            }}
+            className={`rounded-md bg-blue-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-400 ${
+              !isPlaying && totalDuration <= 0 ? "opacity-50 cursor-not-allowed" : ""
+            }`}
           >
             {isPlaying ? "Pause" : "Play"}
           </button>
